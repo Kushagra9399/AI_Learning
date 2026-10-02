@@ -1,22 +1,766 @@
-import React,{useEffect,useState}from"react";import{createRoot}from"react-dom/client";import"./style.css";
-const API="http://localhost:8000/api";
-function useJob(id){const[d,setD]=useState(null);useEffect(()=>{if(!id)return;const t=setInterval(()=>fetch(API+"/jobs/"+id).then(r=>r.json()).then(x=>{setD(x);if(x.status==="completed"||x.status==="failed")clearInterval(t)}),700);return()=>clearInterval(t)},[id]);return d}
-function Worker(){const[c,setC]=useState({name:"",age:25,years_experience:3,occupation:"Construction Electrician",work_context:"",prior_training:""}),[aid,setAid]=useState(""),[job,setJob]=useState(""),[level,setLevel]=useState(null),[questions,setQ]=useState([]),[ans,setAns]=useState({}),[files,setFiles]=useState({}),[step,setStep]=useState("info"),[msg,setMsg]=useState("");const j=useJob(job);
-useEffect(()=>{if(j?.status==="completed"){if(j.result?.suggested_level){setLevel(j.result.suggested_level);setStep("waiting")}if(j.result?.questions)setQ(j.result.questions)}if(j?.status==="failed")setMsg(j.error)},[j]);
-async function submitInfo(){const r=await fetch(API+"/admin/level-suggestion",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(c)}).then(x=>x.json());setAid(r.assessment_id);setJob(r.job_id);setStep("waiting")}
-async function check(){const r=await fetch(API+"/user/"+aid+"/assessment").then(x=>x.json());if(r.questions_approved){setLevel(r.level);setQ(r.questions);setStep("test")}else{setLevel(r.level);setMsg(r.level?"Level "+r.level+" approved. Waiting for question approval.":"Waiting for administrator level approval.")}}
-async function start(){const r=await fetch(API+"/user/"+aid+"/start",{method:"POST"}).then(x=>x.json());if(r.accepted)setStep("test");else setMsg(r.reason)}
-async function submit(){for(const q of questions){const file=files[q.id];if(file){const form=new FormData();form.append("assessment_id",aid);form.append("task_id",q.id);form.append("media",file);await fetch(API+"/evidence",{method:"POST",body:form})}}const payload={assessment_id:aid,qp_code:"CON/Q0603",nsqf_level:level,candidate:c,answers:questions.map(q=>({...q,response:ans[q.id]||"",selected_option:q.type==="mcq"?Number(ans[q.id]):-1})),practical_scores:[]};const r=await fetch(API+"/submissions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(x=>x.json());setMsg(r.accepted?"Submitted. Assessment is now locked to one attempt.":"Submission failed: "+r.reason);if(r.accepted)setStep("done")}
-return <Shell title="Worker Dashboard"><section>{step==="info"&&<><h1>Recognition of Prior Learning</h1><p>Tell us about your prior work experience. The administrator will review the AI-assisted NSQF recommendation.</p><input placeholder="Name"value={c.name}onChange={e=>setC({...c,name:e.target.value})}/><input type="number"placeholder="Age"value={c.age}onChange={e=>setC({...c,age:+e.target.value})}/><input type="number"placeholder="Years experience"value={c.years_experience}onChange={e=>setC({...c,years_experience:+e.target.value})}/><input placeholder="Occupation"value={c.occupation}onChange={e=>setC({...c,occupation:e.target.value})}/><textarea placeholder="Work performed / skills"value={c.work_context}onChange={e=>setC({...c,work_context:e.target.value})}/><textarea placeholder="Prior training / certificates"value={c.prior_training}onChange={e=>setC({...c,prior_training:e.target.value})}/><button onClick={submitInfo}>Submit information</button></>}
-{step==="waiting"&&<><h2>Awaiting administrator</h2><p>Assessment ID: <code>{aid}</code></p><p>AI suggested NSQF Level: <strong>{level||"processing"}</strong></p><button onClick={check}>Check assessment status</button></>}
-{step==="test"&&<><h2>Assessment · NSQF Level {level}</h2><p>Starting the test locks the attempt. It cannot be restarted.</p><button onClick={start}>Start test</button>{questions.map(q=><article key={q.id}><small>{q.type} · {q.marks} marks</small><h3>{q.question}</h3>{q.type==="mcq"?(q.options||[]).map((o,i)=><label key={i}><input type="radio"name={q.id}checked={ans[q.id]===String(i)}onChange={()=>setAns({...ans,[q.id]:String(i)})}/>{o}</label>):q.type==="text"?<textarea placeholder="Write your answer"value={ans[q.id]||""}onChange={e=>setAns({...ans,[q.id]:e.target.value})}/>:<><p>Evidence required for this question. Upload the requested image/video.</p><input type="file"accept={q.type==="image"?"image/*":"video/*"}capture="environment"onChange={e=>setFiles({...files,[q.id]:e.target.files?.[0]})}/></>}</article>)}{questions.length>0&&<button onClick={submit}>Submit one attempt</button>}</>}
-{step==="done"&&<><h2>Assessment submitted</h2><p>{msg}</p><p>The administrator will review AI evaluation and practical/image/video evidence.</p></>}{msg&&step!=="done"&&<p className="notice">{msg}</p>}</section></Shell>}
-function Admin(){const[aid,setAid]=useState(""),[a,setA]=useState(null),[suggest,setS]=useState(null),[level,setLevel]=useState(4),[questions,setQ]=useState([]),[job,setJob]=useState(""),[msg,setMsg]=useState("");const j=useJob(job);useEffect(()=>{if(j?.status==="completed"){if(j.result?.suggested_level){setS(j.result);setLevel(j.result.suggested_level)}if(j.result?.questions)setQ(j.result.questions)}if(j?.status==="failed")setMsg(j.error)},[j]);
-async function load(){const r=await fetch(API+"/admin/candidate/"+aid).then(x=>x.json());if(!r.candidate){setMsg("Candidate not found");return}setA(r.candidate?JSON.parse(r.candidate):{});setLevel(r.level||4);setS(r.level_suggestion?JSON.parse(r.level_suggestion):null);setQ(r.questions?JSON.parse(r.questions):[])}
-async function suggestLevel(){const r=await fetch(API+"/admin/level-suggestion",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(a)}).then(x=>x.json());setAid(r.assessment_id);setJob(r.job_id)}
-async function approve(){await fetch(API+"/admin/level-approval",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessment_id:aid,nsqf_level:level,candidate:a,suggestion:suggest})});setMsg("Level approved.")}
-async function generate(){const r=await fetch(API+"/admin/questions/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessment_id:aid,nsqf_level:level,candidate:a,count:10})}).then(x=>x.json());setJob(r.job_id);setMsg("Groq question generation started.")}
-async function approveQ(){await fetch(API+"/admin/questions/approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessment_id:aid,questions}));setMsg("Questions and marking scheme approved. Test is active for worker.")}
-return <Shell title="Admin Dashboard"><section><h1>RPL Administration</h1><div className="bar"><input placeholder="Assessment ID"value={aid}onChange={e=>setAid(e.target.value)}/><button onClick={load}>Load</button></div>{a&&<><h2>Worker declaration</h2><pre>{JSON.stringify(a,null,2)}</pre>{suggest&&<div className="result"><h2>AI NSQF recommendation</h2><h1>Level {suggest.suggested_level}</h1><p>Confidence: {suggest.confidence}</p><p>{suggest.reason}</p><label>Approved level<input type="number"min="1"max="8"value={level}onChange={e=>setLevel(+e.target.value)}/></label><button onClick={approve}>Approve level</button></div>}<button onClick={suggestLevel}>Run Groq level analysis</button><hr/><h2>AI question generation</h2><p>Level {level} module context is injected into the backend prompt.</p><button onClick={generate}>Generate questions</button>{questions.length>0&&<div><h2>Review / edit questions</h2>{questions.map((q,i)=><article key={q.id}><input value={q.question}onChange={e=>{const x=[...questions];x[i]={...q,question:e.target.value};setQ(x)}}/><select value={q.type||"mcq"}onChange={e=>{const x=[...questions];x[i]={...q,type:e.target.value};setQ(x)}}><option>mcq</option><option>text</option><option>image</option><option>video</option></select><input type="number"min="1"max="10"value={q.marks||1}onChange={e=>{const x=[...questions];x[i]={...q,marks:+e.target.value};setQ(x)}}/><button onClick={()=>setQ(questions.filter(x=>x.id!==q.id))}>Delete</button></article>)}<button onClick={()=>setQ([...questions,{id:"q-"+Date.now(),type:"text",question:"New question",options:[],marks:1}])}>Add question</button><button onClick={approveQ}>Approve & activate test</button></div>}</>}{msg&&<p className="notice">{msg}</p>}</section></Shell>}
-function Shell({title,children}){return <main><header><div><strong>{title}</strong><span>AI-Assisted Recognition of Prior Learning</span></div><nav><a href="/">Worker</a> · <a href="/?admin=1">Admin</a></nav></header>{children}</main>}
-function App(){return new URLSearchParams(location.search).has("admin")?<Admin/>:<Worker/>}createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);
+import React, { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./style.css";
+
+const API = "http://localhost:8000/api";
+
+type Candidate = {
+  name: string;
+  age: number;
+  years_experience: number;
+  occupation: string;
+  work_context: string;
+  prior_training: string;
+};
+
+type Question = {
+  id: string;
+  type: "mcq" | "text" | "image" | "video";
+  question: string;
+  options?: string[];
+  marks: number;
+};
+
+type Job = {
+  status: string;
+  result?: any;
+  error?: string;
+};
+
+function useJob(jobId: string) {
+  const [job, setJob] = useState<Job | null>(null);
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(API + "/jobs/" + jobId);
+        const data = await response.json();
+        setJob(data);
+
+        if (data.status === "completed" || data.status === "failed") {
+          window.clearInterval(timer);
+        }
+      } catch (error) {
+        console.error("Job polling failed:", error);
+      }
+    }, 700);
+
+    return () => window.clearInterval(timer);
+  }, [jobId]);
+
+  return job;
+}
+
+function WorkerDashboard() {
+  const [candidate, setCandidate] = useState<Candidate>({
+    name: "",
+    age: 25,
+    years_experience: 3,
+    occupation: "Construction Electrician",
+    work_context: "",
+    prior_training: "",
+  });
+
+  const [assessmentId, setAssessmentId] = useState("");
+  const [jobId, setJobId] = useState("");
+  const [level, setLevel] = useState<number | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [files, setFiles] = useState<Record<string, File>>({});
+  const [step, setStep] = useState<"info" | "waiting" | "ready" | "test" | "done">("info");
+  const [message, setMessage] = useState("");
+
+  const job = useJob(jobId);
+
+  useEffect(() => {
+    if (!job) return;
+
+    if (job.status === "completed") {
+      if (job.result?.suggested_level) {
+        setLevel(job.result.suggested_level);
+        setStep("waiting");
+        setMessage("AI NSQF recommendation is ready for administrator review.");
+      }
+
+      if (job.result?.questions) {
+        setQuestions(job.result.questions);
+        setStep("ready");
+      }
+    }
+
+    if (job.status === "failed") {
+      setMessage(job.error || "Backend processing failed.");
+    }
+  }, [job]);
+
+  async function submitInformation() {
+    setMessage("");
+
+    const response = await fetch(API + "/admin/level-suggestion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate),
+    });
+
+    const data = await response.json();
+
+    setAssessmentId(data.assessment_id);
+    setJobId(data.job_id);
+    setStep("waiting");
+  }
+
+  async function checkAssessment() {
+    if (!assessmentId) return;
+
+    const response = await fetch(API + "/user/" + assessmentId + "/assessment");
+    const data = await response.json();
+
+    if (!data.exists) {
+      setMessage("Assessment not found.");
+      return;
+    }
+
+    if (data.level) {
+      setLevel(data.level);
+    }
+
+    if (data.questions_approved) {
+      setQuestions(data.questions || []);
+      setStep("ready");
+      setMessage("Assessment approved. You can start your one-time attempt.");
+    } else if (data.level_approved) {
+      setMessage("NSQF level approved. Waiting for administrator question approval.");
+    } else {
+      setMessage("Waiting for administrator level approval.");
+    }
+  }
+
+  async function startAssessment() {
+    const response = await fetch(API + "/user/" + assessmentId + "/start", {
+      method: "POST",
+    });
+
+    const data = await response.json();
+
+    if (!data.accepted) {
+      setMessage(data.reason || "Assessment cannot be started.");
+      return;
+    }
+
+    setStep("test");
+    setMessage("Attempt started. This assessment cannot be restarted.");
+  }
+
+  async function submitAssessment() {
+    setMessage("Uploading evidence and submitting assessment...");
+
+    for (const question of questions) {
+      const file = files[question.id];
+
+      if (!file) continue;
+
+      const form = new FormData();
+      form.append("assessment_id", assessmentId);
+      form.append("task_id", question.id);
+      form.append("media", file);
+
+      await fetch(API + "/evidence", {
+        method: "POST",
+        body: form,
+      });
+    }
+
+    const payload = {
+      assessment_id: assessmentId,
+      qp_code: "CON/Q0603",
+      nsqf_level: level,
+      candidate,
+      answers: questions.map((question) => ({
+        ...question,
+        response: answers[question.id] || "",
+        selected_option:
+          question.type === "mcq"
+            ? Number(answers[question.id])
+            : -1,
+      })),
+      practical_scores: [],
+    };
+
+    const response = await fetch(API + "/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!data.accepted) {
+      setMessage("Submission failed: " + data.reason);
+      return;
+    }
+
+    setStep("done");
+    setMessage("Assessment submitted successfully.");
+  }
+
+  function renderQuestion(question: Question) {
+    if (question.type === "mcq") {
+      return (
+        <div className="question-options">
+          {(question.options || []).map((option, index) => (
+            <label key={index}>
+              <input
+                type="radio"
+                name={question.id}
+                checked={answers[question.id] === String(index)}
+                onChange={() =>
+                  setAnswers({
+                    ...answers,
+                    [question.id]: String(index),
+                  })
+                }
+              />
+              {option}
+            </label>
+          ))}
+        </div>
+      );
+    }
+
+    if (question.type === "text") {
+      return (
+        <textarea
+          placeholder="Write your answer"
+          value={answers[question.id] || ""}
+          onChange={(event) =>
+            setAnswers({
+              ...answers,
+              [question.id]: event.target.value,
+            })
+          }
+        />
+      );
+    }
+
+    return (
+      <>
+        <p>
+          Upload the evidence requested by the administrator for this
+          practical question.
+        </p>
+        <input
+          type="file"
+          accept={question.type === "image" ? "image/*" : "video/*"}
+          capture="environment"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              setFiles({
+                ...files,
+                [question.id]: file,
+              });
+            }
+          }}
+        />
+      </>
+    );
+  }
+
+  return (
+    <Shell title="Worker Dashboard">
+      {step === "info" && (
+        <section>
+          <h1>Recognition of Prior Learning</h1>
+          <p>
+            Submit your prior work experience. The administrator will review
+            the AI-assisted NSQF recommendation.
+          </p>
+
+          <input
+            placeholder="Name"
+            value={candidate.name}
+            onChange={(event) =>
+              setCandidate({ ...candidate, name: event.target.value })
+            }
+          />
+
+          <input
+            type="number"
+            placeholder="Age"
+            value={candidate.age}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                age: Number(event.target.value),
+              })
+            }
+          />
+
+          <input
+            type="number"
+            placeholder="Years of experience"
+            value={candidate.years_experience}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                years_experience: Number(event.target.value),
+              })
+            }
+          />
+
+          <input
+            placeholder="Occupation"
+            value={candidate.occupation}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                occupation: event.target.value,
+              })
+            }
+          />
+
+          <textarea
+            placeholder="Work performed / skills"
+            value={candidate.work_context}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                work_context: event.target.value,
+              })
+            }
+          />
+
+          <textarea
+            placeholder="Prior training / certificates"
+            value={candidate.prior_training}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                prior_training: event.target.value,
+              })
+            }
+          />
+
+          <button onClick={submitInformation}>
+            Submit information
+          </button>
+        </section>
+      )}
+
+      {step === "waiting" && (
+        <section>
+          <h2>Awaiting Administrator Review</h2>
+          <p>
+            Assessment ID: <code>{assessmentId}</code>
+          </p>
+          <p>
+            AI suggested NSQF Level:{" "}
+            <strong>{level ?? "processing"}</strong>
+          </p>
+          <button onClick={checkAssessment}>
+            Check assessment status
+          </button>
+        </section>
+      )}
+
+      {step === "ready" && (
+        <section>
+          <h2>Assessment Ready</h2>
+          <p>
+            NSQF Level: <strong>{level}</strong>
+          </p>
+          <p>
+            Starting the assessment locks your attempt. You cannot restart
+            after starting.
+          </p>
+          <button onClick={startAssessment}>
+            Start One-Time Assessment
+          </button>
+        </section>
+      )}
+
+      {step === "test" && (
+        <section>
+          <h2>Assessment · NSQF Level {level}</h2>
+
+          {questions.map((question) => (
+            <article key={question.id} className="question-card">
+              <small>
+                {question.type.toUpperCase()} · {question.marks} marks
+              </small>
+
+              <h3>{question.question}</h3>
+
+              {renderQuestion(question)}
+            </article>
+          ))}
+
+          <button onClick={submitAssessment}>
+            Submit Assessment
+          </button>
+        </section>
+      )}
+
+      {step === "done" && (
+        <section>
+          <h2>Assessment Submitted</h2>
+          <p>{message}</p>
+          <p>
+            The administrator will review AI evaluation and practical
+            image/video evidence.
+          </p>
+        </section>
+      )}
+
+      {message && step !== "done" && (
+        <p className="notice">{message}</p>
+      )}
+    </Shell>
+  );
+}
+
+function AdminDashboard() {
+  const [assessmentId, setAssessmentId] = useState("");
+  const [candidate, setCandidate] = useState<Candidate | null>(null);
+  const [suggestion, setSuggestion] = useState<any>(null);
+  const [level, setLevel] = useState(4);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [jobId, setJobId] = useState("");
+  const [message, setMessage] = useState("");
+
+  const job = useJob(jobId);
+
+  useEffect(() => {
+    if (!job) return;
+
+    if (job.status === "completed") {
+      if (job.result?.suggested_level) {
+        setSuggestion(job.result);
+        setLevel(job.result.suggested_level);
+        setMessage("AI NSQF recommendation is ready for approval.");
+      }
+
+      if (job.result?.questions) {
+        setQuestions(job.result.questions);
+        setMessage("AI question draft is ready for administrator review.");
+      }
+    }
+
+    if (job.status === "failed") {
+      setMessage(job.error || "AI processing failed.");
+    }
+  }, [job]);
+
+  async function loadCandidate() {
+    const response = await fetch(
+      API + "/admin/candidate/" + assessmentId
+    );
+    const data = await response.json();
+
+    if (!data.assessment_id || !data.candidate) {
+      setMessage("Candidate not found.");
+      return;
+    }
+
+    setCandidate(JSON.parse(data.candidate));
+    setLevel(data.level || 4);
+    setSuggestion(
+      data.level_suggestion
+        ? JSON.parse(data.level_suggestion)
+        : null
+    );
+    setQuestions(
+      data.questions
+        ? JSON.parse(data.questions)
+        : []
+    );
+  }
+
+  async function runLevelAnalysis() {
+    if (!candidate) return;
+
+    const response = await fetch(API + "/admin/level-suggestion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate),
+    });
+
+    const data = await response.json();
+
+    setAssessmentId(data.assessment_id);
+    setJobId(data.job_id);
+    setMessage("Groq NSQF level analysis started.");
+  }
+
+  async function approveLevel() {
+    await fetch(API + "/admin/level-approval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assessment_id: assessmentId,
+        nsqf_level: level,
+        candidate,
+        suggestion,
+      }),
+    });
+
+    setMessage(
+      "NSQF level approved. Question generation is now available."
+    );
+  }
+
+  async function generateQuestions() {
+    const response = await fetch(
+      API + "/admin/questions/generate",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assessment_id: assessmentId,
+          nsqf_level: level,
+          candidate,
+          count: 10,
+        }),
+      }
+    );
+
+    const data = await response.json();
+    setJobId(data.job_id);
+    setMessage("Groq question generation started.");
+  }
+
+  async function approveQuestions() {
+    await fetch(API + "/admin/questions/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assessment_id: assessmentId,
+        questions,
+      }),
+    });
+
+    setMessage(
+      "Questions and marking scheme approved. Test is now active for the worker."
+    );
+  }
+
+  function updateQuestion(
+    index: number,
+    changes: Partial<Question>
+  ) {
+    const updated = [...questions];
+    updated[index] = {
+      ...updated[index],
+      ...changes,
+    };
+    setQuestions(updated);
+  }
+
+  return (
+    <Shell title="Admin Dashboard">
+      <section>
+        <h1>RPL Administration</h1>
+
+        <div className="toolbar">
+          <input
+            placeholder="Assessment ID"
+            value={assessmentId}
+            onChange={(event) =>
+              setAssessmentId(event.target.value)
+            }
+          />
+          <button onClick={loadCandidate}>
+            Load Candidate
+          </button>
+        </div>
+
+        {candidate && (
+          <>
+            <h2>Worker Declaration</h2>
+            <pre>{JSON.stringify(candidate, null, 2)}</pre>
+
+            <section className="result">
+              <h2>AI NSQF Recommendation</h2>
+
+              {suggestion ? (
+                <>
+                  <h1>Level {suggestion.suggested_level}</h1>
+                  <p>
+                    Confidence: {suggestion.confidence}
+                  </p>
+                  <p>{suggestion.reason}</p>
+                </>
+              ) : (
+                <p>No AI recommendation has been generated yet.</p>
+              )}
+
+              <label>
+                Administrator Approved Level
+                <input
+                  type="number"
+                  min="1"
+                  max="8"
+                  value={level}
+                  onChange={(event) =>
+                    setLevel(Number(event.target.value))
+                  }
+                />
+              </label>
+
+              <button
+                onClick={approveLevel}
+                disabled={!suggestion}
+              >
+                Approve Level
+              </button>
+            </section>
+
+            <button onClick={runLevelAnalysis}>
+              Run Groq Level Analysis
+            </button>
+
+            <hr />
+
+            <h2>AI Question Generation</h2>
+
+            <p>
+              NSQF Level {level} module context will be injected into
+              the backend Groq prompt.
+            </p>
+
+            <button onClick={generateQuestions}>
+              Generate Questions
+            </button>
+
+            {questions.length > 0 && (
+              <section>
+                <h2>Review Questions & Marking Scheme</h2>
+
+                {questions.map((question, index) => (
+                  <article
+                    key={question.id}
+                    className="question-card"
+                  >
+                    <input
+                      value={question.question}
+                      onChange={(event) =>
+                        updateQuestion(index, {
+                          question: event.target.value,
+                        })
+                      }
+                    />
+
+                    <select
+                      value={question.type}
+                      onChange={(event) =>
+                        updateQuestion(index, {
+                          type: event.target.value as Question["type"],
+                        })
+                      }
+                    >
+                      <option value="mcq">MCQ</option>
+                      <option value="text">Text</option>
+                      <option value="image">Image</option>
+                      <option value="video">Video</option>
+                    </select>
+
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={question.marks}
+                      onChange={(event) =>
+                        updateQuestion(index, {
+                          marks: Number(event.target.value),
+                        })
+                      }
+                    />
+
+                    <button
+                      onClick={() =>
+                        setQuestions(
+                          questions.filter(
+                            (_, questionIndex) =>
+                              questionIndex !== index
+                          )
+                        )
+                      }
+                    >
+                      Delete
+                    </button>
+                  </article>
+                ))}
+
+                <button
+                  onClick={() =>
+                    setQuestions([
+                      ...questions,
+                      {
+                        id: "q-" + Date.now(),
+                        type: "text",
+                        question: "New question",
+                        options: [],
+                        marks: 1,
+                      },
+                    ])
+                  }
+                >
+                  Add Question
+                </button>
+
+                <button onClick={approveQuestions}>
+                  Approve & Activate Test
+                </button>
+              </section>
+            )}
+          </>
+        )}
+
+        {message && <p className="notice">{message}</p>}
+      </section>
+    </Shell>
+  );
+}
+
+function Shell({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <main>
+      <header>
+        <div>
+          <strong>{title}</strong>
+          <span>AI-Assisted Recognition of Prior Learning</span>
+        </div>
+
+        <nav>
+          <a href="/">Worker</a>
+          {" · "}
+          <a href="/?admin=1">Admin</a>
+        </nav>
+      </header>
+
+      {children}
+    </main>
+  );
+}
+
+function App() {
+  const isAdmin = new URLSearchParams(window.location.search).has(
+    "admin"
+  );
+
+  return isAdmin ? <AdminDashboard /> : <WorkerDashboard />;
+}
+
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
