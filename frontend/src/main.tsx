@@ -79,7 +79,7 @@ async function getAll<T>(store: string): Promise<T[]> {
   });
 }
 
-function App() {
+function UserDashboard() {
   const [online, setOnline] = useState(navigator.onLine);
   const [stage, setStage] = useState("declare");
   const [candidate, setCandidate] = useState<Candidate>({
@@ -532,8 +532,175 @@ function App() {
   );
 }
 
-function DashboardRouter(){const admin=new URLSearchParams(window.location.search).has("admin");return admin?<AdminDashboard/>:<UserDashboard/>}\n\ncreateRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+function AssessorDashboard({
+  assessmentId,
+  tasks,
+  online,
+}: {
+  assessmentId: string;
+  tasks: Task[];
+  online: boolean;
+}) {
+  const [view, setView] = useState<any>(null);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!online) return;
+
+    fetch(API + "/assessor/" + assessmentId)
+      .then((response) => response.json())
+      .then(setView)
+      .catch(() => setMessage("Could not load assessor data."));
+  }, [assessmentId, online]);
+
+  async function evaluate() {
+    const practicalScores = tasks.map((task) => ({
+      task_id: task.id,
+      score: Math.min(
+        task.max_score,
+        Math.max(0, Number(scores[task.id] || 0))
+      ),
+      max_score: task.max_score,
+      assessor_id: "demo-assessor",
+    }));
+
+    const response = await fetch(
+      API + "/assessor/" + assessmentId + "/evaluate",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assessor_id: "demo-assessor",
+          practical_scores: practicalScores,
+        }),
+      }
+    );
+
+    const job = await response.json();
+
+    if (!job.job_id) {
+      setMessage(job.reason || "Evaluation could not be started.");
+      return;
+    }
+
+    let result;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      result = await fetch(API + "/jobs/" + job.job_id).then((r) => r.json());
+    } while (result.status === "queued" || result.status === "running");
+
+    if (result.status !== "completed") {
+      setMessage(result.error || "Evaluation failed.");
+      return;
+    }
+
+    setView((current: any) => ({
+      ...current,
+      evaluation: result.result,
+    }));
+    setMessage("AI-assisted evaluation is ready for assessor review.");
+  }
+
+  async function signOff() {
+    await fetch(API + "/assessor/" + assessmentId + "/signoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assessor_id: "demo-assessor",
+        decision: "approved_after_review",
+        remarks: "Assessor reviewed the evidence and AI-assisted scoring.",
+      }),
+    });
+
+    setMessage("Assessor sign-off recorded.");
+  }
+
+  if (!view) {
+    return (
+      <section>
+        <h2>Assessor dashboard</h2>
+        <p>Loading assessment...</p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <h2>Assessor dashboard</h2>
+      <p>
+        Assessment: <code>{assessmentId}</code>
+      </p>
+
+      <h3>Self-declaration</h3>
+      <pre>{JSON.stringify(view.submission?.candidate, null, 2)}</pre>
+
+      <h3>Evidence</h3>
+      {view.evidence?.length ? (
+        view.evidence.map((item: any) => (
+          <p key={item.evidence_id}>
+            {item.task_id} — {item.filename} ({item.media_type})
+          </p>
+        ))
+      ) : (
+        <p>No evidence uploaded.</p>
+      )}
+
+      <h3>Practical scoring</h3>
+      {tasks.map((task) => (
+        <article key={task.id}>
+          <strong>
+            {task.id} — {task.title}
+          </strong>
+          <p>
+            {task.rubric
+              .map((item) => item.criterion + " (" + item.weight + ")")
+              .join(", ")}
+          </p>
+          <input
+            type="number"
+            min="0"
+            max={task.max_score}
+            placeholder={"Score / " + task.max_score}
+            onChange={(event) =>
+              setScores({
+                ...scores,
+                [task.id]: Number(event.target.value),
+              })
+            }
+          />
+        </article>
+      ))}
+
+      <button onClick={evaluate}>Run AI-assisted evaluation</button>
+
+      {view.evaluation && (
+        <div className="result">
+          <h3>Competency evaluation</h3>
+          <h1>{view.evaluation.overall_percentage}%</h1>
+          <p>
+            Provisional outcome:{" "}
+            {view.evaluation.provisional_pass
+              ? "Meets threshold"
+              : "Gaps identified"}
+          </p>
+
+          <h4>NOS results</h4>
+          {view.evaluation.nos_results?.map((item: any) => (
+            <p key={item.nos_code}>
+              <strong>{item.nos_code}</strong> — {item.name}:{" "}
+              {item.practical_percentage ?? item.theory_percentage}%
+            </p>
+          ))}
+
+          <p>AI output is advisory. The assessor retains final authority.</p>
+          <button onClick={signOff}>Sign off assessment</button>
+        </div>
+      )}
+
+      {message && <p>{message}</p>}
+    </section>
+  );
+}
+
+function AdminDashboard(){const[assessmentId,setAssessmentId]=useState(""),[candidate,setCandidate]=useState<any>(null),[suggestion,setSuggestion]=useState<any>(null),[level,setLevel]=useState(4),[questions,setQuestions]=useState<any[]>([]),[jobId,setJobId]=useState(""),[message,setMessage]=useState("");const job=useJob(jobId);async function loadCandidate(){const r=await fetch(API+"/admin/candidate/"+assessmentId).then(x=>x.json());if(!r.assessment_id){setMessage("Assessment not found");return}setCandidate(r.candidate?JSON.parse(r.candidate):{});setLevel(r.level||4);setSuggestion(r.level_suggestion?JSON.parse(r.level_suggestion):null);setQuestions(r.questions?JSON.parse(r.questions):[])}async function generateLevel(){const r=await fetch(API+"/admin/level-suggestion",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(candidate)}).then(x=>x.json());setAssessmentId(r.assessment_id);setJobId(r.job_id);setMessage("AI NSQF assessment started.")}useEffect(()=>{if(job?.status==="completed"){if(job.result?.suggested_level){setSuggestion(job.result);setLevel(job.result.suggested_level);setMessage("AI level suggestion ready for approval.")}if(job.result?.questions){setQuestions(job.result.questions);setMessage("AI question draft ready for review.")}}if(job?.status==="failed")setMessage(job.error||"AI job failed")},[job]);async function approveLevel(){await fetch(API+"/admin/level-approval",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessment_id:assessmentId,nsqf_level:level,candidate})});setMessage("NSQF level approved. You can now generate questions.")}async function generateQuestions(){const r=await fetch(API+"/admin/questions/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessment_id:assessmentId,nsqf_level:level,candidate,count:10})}).then(x=>x.json());setJobId(r.job_id);setMessage("Question generation started.")}async function approveQuestions(){await fetch(API+"/admin/questions/approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessment_id:assessmentId,questions}));setMessage("Questions and marking scheme approved and released to worker.")}return <main><header><div><strong>Admin Dashboard</strong><span>RPL Administration</span></div><nav><a href="/">Worker</a> · <a href="/?admin=1">Admin</a></nav></header><section><div><input placeholder="Assessment ID"value={assessmentId}onChange={e=>setAssessmentId(e.target.value)}/><button onClick={loadCandidate}>Load candidate</button></div>{candidate&&<><h2>Candidate information</h2><pre>{JSON.stringify(candidate,null,2)}</pre>{suggestion&&<section className="result"><h2>AI NSQF suggestion</h2><h1>Level {suggestion.suggested_level}</h1><p>Confidence: {suggestion.confidence}</p><p>{suggestion.reason}</p><label>Administrator approved level<input type="number"min="1"max="8"value={level}onChange={e=>setLevel(Number(e.target.value))}/></label><button onClick={approveLevel}>Approve level</button></section>}<section><h2>Question generation</h2><p>Level-specific NSQF module context is injected into the Groq prompt.</p><button onClick={generateQuestions}>Generate questions</button></section>{questions.length>0&&<section><h2>Review questions & marking scheme</h2>{questions.map((q,i)=><article key={q.id}><input value={q.question}onChange={e=>{const a=[...questions];a[i]={...q,question:e.target.value};setQuestions(a)}}/><select value={q.type||"mcq"}onChange={e=>{const a=[...questions];a[i]={...q,type:e.target.value};setQuestions(a)}}><option value="mcq">MCQ</option><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option></select><input type="number"min="1"max="10"value={q.marks||1}onChange={e=>{const a=[...questions];a[i]={...q,marks:Number(e.target.value)};setQuestions(a)}}/><button onClick={()=>setQuestions(questions.filter(x=>x.id!==q.id))}>Delete</button></article>)}<button onClick={()=>setQuestions([...questions,{id:"q-"+Date.now(),type:"text",question:"New question",options:[],marks:1}])}>Add question</button><button onClick={approveQuestions}>Approve & release test</button></section>}</>}{message&&<p>{message}</p>}</section></main>}function useJob(id:string){const[data,setData]=useState<any>(null);useEffect(()=>{if(!id)return;const t=setInterval(async()=>{const r=await fetch(API+"/jobs/"+id).then(x=>x.json());setData(r);if(r.status==="completed"||r.status==="failed")clearInterval(t)},700);return()=>clearInterval(t)},[id]);return data}function App(){return new URLSearchParams(window.location.search).has("admin")?<AdminDashboard/>:<UserDashboard/>}createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);
