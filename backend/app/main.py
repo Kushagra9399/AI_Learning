@@ -37,8 +37,6 @@ def question_job(payload: dict):
 
 @app.post("/api/jobs/evaluation")
 def evaluation_job(payload: dict):
-    if not store.submit(payload):
-        return {"message":"assessment already submitted","accepted":False,"reason":"single_attempt_already_submitted"}
     job=store.job("evaluation",payload)
     store.run_async(job, lambda: evaluate_attempt(payload))
     return {"message":"evaluation added","job_id":job["id"],"status":"queued","accepted":True}
@@ -82,6 +80,16 @@ def assessor_view(assessment_id:str):
         rows=c.execute("SELECT evidence_id,task_id,filename,media_type,created_at FROM evidence WHERE assessment_id=? ORDER BY created_at",(assessment_id,)).fetchall()
     view["evidence"]=[dict(x) for x in rows]
     return view
+
+@app.post("/api/assessor/{assessment_id}/evaluate")
+def assessor_evaluate(assessment_id:str,payload:dict):
+    view=store.assessor(assessment_id)
+    if not view["submission"]:
+        return {"accepted":False,"reason":"assessment_not_found"}
+    evaluation_payload={**view["submission"],"assessment_id":assessment_id,"practical_scores":payload.get("practical_scores",[])}
+    job=store.job("assessor_evaluation",evaluation_payload)
+    store.run_async(job, lambda: evaluate_attempt(evaluation_payload))
+    return {"accepted":True,"job_id":job["id"],"status":"queued","assessor_id":payload.get("assessor_id")}
 
 @app.post("/api/assessor/{assessment_id}/signoff")
 def signoff(assessment_id:str,payload:dict):
