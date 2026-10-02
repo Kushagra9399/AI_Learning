@@ -11,7 +11,7 @@ def evaluate_attempt(p):
     theory_correct = sum(a.get("selected_option") == a.get("correct_option") for a in answers)
     theory = theory_correct / max(1, len(answers)) * 100
     practical_pct = practical_percentage(practical)
-    overall = theory if practical_pct is None else theory * 0.30 + practical_pct * 0.70
+    overall = theory if practical_pct is None else theory * (QP["theory_marks"] / QP["total_marks"]) + practical_pct * (QP["practical_marks"] / QP["total_marks"])
     nos = []
     for n in QP["nos"]:
         xs = [a for a in answers if a.get("nos_code") == n["code"]]
