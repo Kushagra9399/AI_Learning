@@ -1,153 +1,48 @@
+# AI-Assisted Skill Assessment Tool for Recognition of Prior Learning (RPL)
 
----
+This branch reworks the original AI Learning prototype into an MSDE/NCVET-oriented RPL assessment workflow.
 
-#  AI-Powered Adaptive Learning Roadmap Generator
+## Repository structure
+- **frontend/** — React + Vite interface, offline assessment package storage, single-attempt test flow and job polling.
+- **backend/** — FastAPI services for QP mapping, asynchronous question generation, deterministic scoring, recommendation and assessor sign-off.
+- **images/** — original project assets retained where useful.
 
-> **An intelligent learning assistant that interviews users, assesses skill levels, generates adaptive study roadmaps, and tracks progress using LLM + automation agents.**
+## Reference qualification
+The MVP is anchored to **Construction Electrician - LV (CON/Q0603), Version 5.0, NSQF Level 4**. The QP contains seven compulsory NOS units and a 70% aggregate pass threshold. QP/NOS identifiers are kept deterministic so an LLM cannot invent a qualification framework.
 
----
-## 🧩 Problem Statement
+## Low-connectivity workflow
+1. Worker completes a structured prior-experience declaration.
+2. Backend maps the declaration to the supported QP.
+3. Question generation is queued and immediately returns a job_id.
+4. The frontend polls the job and stores the completed assessment package locally.
+5. The worker can take the test offline.
+6. A unique assessment_id enforces one test attempt.
+7. The completed attempt remains locally available until connectivity returns.
+8. Evaluation and recommendation run asynchronously and are delivered through job polling.
+9. Assessor-facing output explicitly separates AI assistance from final human judgement.
 
-> Build an intelligent agent-based learning system that interviews users, assesses skill levels, generates personalized weekly roadmaps, dynamically adapts to feedback, and continuously tracks learning progress.
+A normal browser SPA cannot reliably expose an inbound HTTP webhook. Therefore polling is the guaranteed delivery mechanism; a server/relay callback can be added when the deployment environment provides one.
 
----
+## Run
 
-## 📌 Overview
+### Backend
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
 
-Traditional learning platforms provide **static content and generic learning paths**, which often fail to adapt to individual learner needs, pace, and goals.
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-This project introduces an **AI-powered adaptive learning system** that:
+## Assessor boundary
+The system is an **AI-assisted** assessment tool. It does not issue a certificate. Practical evidence, authenticity, assessor rubric scoring, overrides and final certification/sign-off remain human-controlled.
 
-* Understands the learner’s **goal, competency level, and time constraints**
-* Conducts an **AI-based diagnostic assessment**
-* Generates a **personalized, structured learning roadmap**
-* Continuously **tracks progress and adapts plans**
-* Automates **resource discovery and workflow orchestration** using intelligent agents
-
-The system leverages **Large Language Models (LLMs)** and **workflow automation agents (n8n)** to create a **dynamic, student-centric learning experience**.
-
----
-
-## 🎯 Target Users
-
-* School Students
-* College Students
-* Competitive Exam Aspirants
-
----
-
-##  Key Features
-
-### ✅ Implemented Features
-
-* **Smart Onboarding Form (React.js UI)**
-
-  * Captures learning goal, current skill level, and time availability.
-
-* **AI-Based Diagnostic Test Generation**
-
-  * Automatically generates **10 adaptive questions** (easy, medium, hard).
-  * Evaluates competency and identifies **knowledge gaps**.
-
-* **Automated Competency Evaluation**
-
-  * Calculates scores.
-  * Highlights strengths and improvement areas.
-
-* **Personalized Structured Learning Roadmap**
-
-  * Generates **weekly/day-wise learning plans**.
-  * Adapts difficulty based on user competency.
-
-* **Progress Tracking using Automation Agent**
-
-  * Stores **learning progress in Google Sheets**.
-  * Maintains long-term learning history.
-
----
-
-### Future Enhancements
-
-*  Automated **email reminders & deadline alerts**
-* **Dynamic roadmap adaptation** based on continuous feedback
-*  Visual analytics dashboard
-*  Concept-level weakness detection & revision planning
-
----
-
-## 🏗️ System Architecture
-
- **WorkFlow Diagram** 
-![arch diag](images/image.png)
-
----
-
-## ⚙️ Tech Stack
-
-| Layer               | Technology             |
-| ------------------- | ---------------------- |
-| Frontend            | React.js               |
-| Backend             | Serverless APIs        |
-| AI Model            | Groq – OpenAI OSS 120B |
-| Agent Orchestration | n8n                    |
-| Database            | Google Sheets          |
-| Deployment          | Local                  |
-
----
-
-## 🔁 Workflow Pipeline
-
-1. User submits learning preferences via React UI.
-2. Backend forwards request to **n8n automation workflow**.
-3. n8n sends structured prompts to **Groq LLM**.
-4. LLM:
-
-   * Generates diagnostic test
-   * Evaluates responses
-   * Builds structured learning roadmap
-5. n8n stores progress data into **Google Sheets**.
-6. Roadmap and evaluation are displayed on the user dashboard.
-
-
----
-
-## 🌟 Innovation & Uniqueness
-
-* **Adaptive learning intelligence instead of static courses**
-* **Agent-based orchestration using n8n**
-* **Dynamic competency evaluation using LLM reasoning**
-* **Fully automated progress tracking**
-* **Scalable design for future adaptive coaching**
-
----
-
-## 👥 Team Members
-
-| Name                  | Role                                  |
-| --------------------- | ------------------------------------- |
-| **Shivam Chopade**    | System Architecture & AI Integration  |
-| **Pratik Patil**      | Frontend Development                  |
-| **Kushagra Prajapat** | Automation & n8n Workflow Engineering |
-
----
-
-## Example Use Case
-
-> A student preparing for **DSA interviews in 2 months** enters their goal and current level.
-> The system:
->
-> * Generates a diagnostic test
-> * Identifies weak concepts
-> * Creates a structured weekly roadmap
-> * Tracks learning progress automatically
-> * (Future) Sends reminders & adapts learning plan
-
----
-
-## 🏁 Conclusion
-
-This project demonstrates the **practical integration of AI + automation agents** to build a **truly adaptive learning platform**, addressing real-world challenges in personalized education.
-
----
-
-#
+## Current scope
+The repository now contains the requested frontend/backend separation and low-connectivity async workflow. Practical image/video evidence capture, richer assessor rubric screens and a formal inter-assessor agreement experiment should be added as the next validation layer rather than being represented as automated certification.
