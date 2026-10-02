@@ -1,33 +1,710 @@
-import React,{useEffect,useState} from "react";
-import{createRoot}from"react-dom/client";
-import"./style.css";
+import React, { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./style.css";
 
-const API="http://localhost:8000/api";
-const DB="rpl_offline_v2";
+const API = "http://localhost:8000/api";
+const DB_NAME = "rpl_offline_v3";
 
-function openDB(){return new Promise<IDBDatabase>((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>{const d=r.result;["packages","attempts","evidence","jobs"].forEach(s=>{if(!d.objectStoreNames.contains(s))d.createObjectStore(s,{keyPath:"id"})})};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-async function put(storeName:any,value:any){const d=await openDB();return new Promise<void>((resolve,reject)=>{const t=d.transaction(storeName,"readwrite");t.objectStore(storeName).put(value);t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error)})}
-async function get(storeName:any,id:any){const d=await openDB();return new Promise<any>((resolve,reject)=>{const t=d.transaction(storeName,"readonly");const r=t.objectStore(storeName).get(id);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-async function all(storeName:any){const d=await openDB();return new Promise<any[]>((resolve,reject)=>{const t=d.transaction(storeName,"readonly");const r=t.objectStore(storeName).getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+type Candidate = {
+  name: string;
+  age: number;
+  years_experience: number;
+  occupation: string;
+  work_context: string;
+  prior_training: string;
+};
 
-function Assessor({assessmentId,tasks,online}:{assessmentId:string,tasks:any[],online:boolean}){const [view,setView]=useState<any>(null),[scores,setScores]=useState<any>({}),[message,setMessage]=useState("");useEffect(()=>{if(online)fetch(API+"/assessor/"+assessmentId).then(r=>r.json()).then(setView)},[assessmentId,online]);if(!view)return <section><h2>Assessor dashboard</h2><p>Loading assessment {assessmentId}…</p></section>;async function evaluate(){const practical_scores=tasks.map(t=>scores[t.id]?{task_id:t.id,score:Number(scores[t.id]),max_score:t.max_score,assessor_id:"assessor"}:null).filter(Boolean);const r=await fetch(API+"/assessor/"+assessmentId+"/evaluate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessor_id:"assessor",practical_scores})}).then(x=>x.json());if(!r.job_id){setMessage(r.reason||"Could not start evaluation");return}let j;do{await new Promise(x=>setTimeout(x,600));j=await fetch(API+"/jobs/"+r.job_id).then(x=>x.json())}while(j.status==="queued"||j.status==="running");setView({...view,evaluation:j.result});setMessage("AI-assisted scoring prepared. Review it before sign-off.");}async function sign(){await fetch(API+"/assessor/"+assessmentId+"/signoff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assessor_id:"assessor",decision:"approved_after_review",remarks:"Assessor reviewed the evidence and AI-assisted scoring."})});setMessage("Assessor sign-off recorded.");}return <section><h2>Assessor dashboard</h2><p>Assessment: <code>{assessmentId}</code></p><h3>Self-declaration</h3><pre>{JSON.stringify(view.submission?.candidate,null,2)}</pre><h3>Evidence</h3>{(view.evidence||[]).map((e:any)=><p key={e.evidence_id}>{e.task_id}: {e.filename} ({e.media_type})</p>)}<h3>Practical rubric</h3>{tasks.map(t=><article key={t.id}><b>{t.id} — {t.title}</b><p>{t.rubric.map((r:any)=>r.criterion+" ("+r.weight+")").join(", ")}</p><input type="number" min="0" max={t.max_score} placeholder={"Assessor score / "+t.max_score} onChange={e=>setScores({...scores,[t.id]:e.target.value})}/></article>)}<button onClick={evaluate}>Run AI-assisted evaluation</button>{view.evaluation&&<div><h3>Evaluation</h3><p>Overall: {view.evaluation.overall_percentage}% · provisional: {view.evaluation.provisional_pass?"meets threshold":"gaps identified"}</p><p>AI output is advisory; assessor may override with documented reason.</p><button onClick={sign}>Sign off</button></div>}{message&&<p>{message}</p>}</section>}\n\nfunction App(){
- const[online,setOnline]=useState(navigator.onLine),[stage,setStage]=useState("declare"),[candidate,setCandidate]=useState({name:"",age:18,years_experience:0,occupation:"Construction Electrician",work_context:"",skills:"",prior_training:""}),[job,setJob]=useState<any>(null),[questions,setQuestions]=useState<any[]>([]),[answers,setAnswers]=useState<any>({}),[assessment,setAssessment]=useState<any>(null),[result,setResult]=useState<any>(null),[tasks,setTasks]=useState<any[]>([]),[scores,setScores]=useState<any>({}),[evidence,setEvidence]=useState<any>({}),[error,setError]=useState("");
- useEffect(()=>{navigator.serviceWorker?.register("/sw.js").catch(()=>{});const fn=()=>setOnline(navigator.onLine);addEventListener("online",fn);addEventListener("offline",fn);fetch(API+"/practical/tasks").then(r=>r.json()).then(x=>setTasks(x.tasks)).catch(()=>{});return()=>{removeEventListener("online",fn);removeEventListener("offline",fn)}},[]);
- useEffect(()=>{let timer:any;if(job&&online)timer=setInterval(async()=>{const r=await fetch(API+"/jobs/"+job).then(x=>x.json());if(r.status==="completed"){await put("packages",{id:"construction-electrician",questions:r.result.questions});setQuestions(r.result.questions);setJob(null);setStage("test")}if(r.status==="failed")setError(r.error)},1000);return()=>clearInterval(timer)},[job,online]);
- async function generate(){setError("");if(!online){setError("Connect once to download the assessment package, then you can complete it offline.");return}const m=await fetch(API+"/declarations/map",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(candidate)}).then(r=>r.json());if(!m.qp_code){setError("This release supports Construction Electrician - LV. Another trade must be selected by an assessor.");return}const r=await fetch(API+"/jobs/questions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({qp_code:m.qp_code,count:12})}).then(r=>r.json());setJob(r.job_id);setStage("waiting")}
- async function startOffline(){const p=await get("packages","construction-electrician");if(p){setQuestions(p.questions);setStage("test")}else setError("No downloaded assessment package is available offline.")}
- async function capture(task:any){if(!assessment){setError("Submit the theory attempt before attaching evidence.");return}const input=document.createElement("input");input.type="file";input.accept="image/*,video/*";input.capture="environment";input.onchange=async()=>{const f=input.files?.[0];if(!f)return;const id="ev_"+crypto.randomUUID();await put("evidence",{id,assessment_id:assessment,task_id:task.id,name:f.name,type:f.type,blob:f,sync_status:"pending"});setEvidence({...evidence,[task.id]:[...(evidence[task.id]||[]),{id,name:f.name,type:f.type,sync_status:"pending"}]})};input.click()}
- async function submit(){if(Object.keys(answers).length!==questions.length){setError("Answer every question before the single submission.");return}const id="assessment_"+crypto.randomUUID();const payload={assessment_id:id,candidate_id:candidate.name||"offline-candidate",qp_code:"CON/Q0603",candidate,answers:questions.map(q=>({...q,selected_option:answers[q.id]})),practical_scores:[]};await put("attempts",{id,payload,sync_status:online?"pending":"queued"});setAssessment(id);setStage("practical");if(online)await syncAttempt(payload)}
- async function syncAttempt(p:any){try{const r=await fetch(API+"/submissions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)}).then(x=>x.json());if(r.accepted===false){setError(r.reason||"Assessment was already submitted.");return false}await put("attempts",{id:p.assessment_id,payload:p,sync_status:"submitted"});setStage("submitted");return true}catch(e){setError("Submission is queued locally; reconnect to sync.");return false}}\n async function finish(){const p=(await get("attempts",assessment))?.payload;if(!p)return;await put("attempts",{id:assessment,payload:p,sync_status:online?"pending":"queued"});if(online)await syncAttempt(p);else setStage("submitted")}
- async function syncEvidence(){if(!online)return;const rows=await all("evidence");for(const x of rows.filter((r:any)=>r.sync_status!=="synced")){const fd=new FormData();fd.append("assessment_id",x.assessment_id);fd.append("task_id",x.task_id);fd.append("media",x.blob,x.name);try{await fetch(API+"/evidence",{method:"POST",body:fd});x.sync_status="synced";await put("evidence",x)}catch{}}}
- useEffect(()=>{if(online){all("attempts").then(xs=>xs.filter(x=>x.sync_status==="queued"||x.sync_status==="pending").forEach(x=>syncAttempt(x.payload)));syncEvidence()}},[online]);
- return <main><header><b>RPL Skill Assessment</b><span>{online?"Online":"Offline"} · Construction Electrician - LV · NSQF 4</span></header>
- {stage==="declare"&&<section><h1>Recognition of Prior Learning</h1><p>Structured self-declaration starts the assessment. AI assists; an authorized assessor makes the final certification decision.</p><input placeholder="Name" value={candidate.name} onChange={e=>setCandidate({...candidate,name:e.target.value})}/><input type="number" placeholder="Age" value={candidate.age} onChange={e=>setCandidate({...candidate,age:+e.target.value})}/><input type="number" placeholder="Years of experience" value={candidate.years_experience} onChange={e=>setCandidate({...candidate,years_experience:+e.target.value})}/><textarea placeholder="Work context and tasks performed" value={candidate.work_context} onChange={e=>setCandidate({...candidate,work_context:e.target.value})}/><textarea placeholder="Prior training/certificates" value={candidate.prior_training} onChange={e=>setCandidate({...candidate,prior_training:e.target.value})}/><button onClick={generate}>Download assessment package</button>{!online&&<button onClick={startOffline}>Use downloaded package</button>}</section>}
- {stage==="waiting"&&<section><h2>Assessment package requested</h2><p>Job <code>{job}</code> is processing asynchronously. The completed package is stored locally for offline use.</p></section>}
- {stage==="test"&&<section><h2>Theory assessment — single attempt</h2>{questions.map((q,i)=><article key={q.id}><small>{i+1}. {q.nos_code} / {q.pc_id}</small><h3>{q.question}</h3>{q.options.map((o,j)=><label key={j}><input type="radio" name={q.id} checked={answers[q.id]===j} onChange={()=>setAnswers({...answers,[q.id]:j})}/>{o}</label>)}</article>)}<button onClick={submit}>Save single attempt</button></section>}
- {stage==="practical"&&<section><h2>Practical evidence and assessor rubric</h2><p>Complete the practical tasks on a safe training setup. Scores are assessor-entered; the worker cannot certify themselves.</p>{tasks.map(t=><article key={t.id}><h3>{t.id} — {t.title}</h3><p>{t.instructions}</p><p><b>Safety:</b> {t.safety}</p><ul>{t.rubric.map((r:any)=><li key={r.criterion}>{r.criterion} — {r.weight} points</li>)}</ul><button onClick={()=>capture(t)}>Capture photo/video evidence</button><small> Evidence: {(evidence[t.id]||[]).length} queued/attached</small></article>)}<button onClick={finish}>Submit for evaluation</button></section>}
- {stage==="submitted"&&<section><h2>Assessment submitted</h2><p>Assessment ID: <code>{assessment}</code></p><p>The candidate evidence is now available to the assessor. Practical scoring, AI-assisted evaluation and final sign-off happen in the assessor workflow.</p><a href={"?assessor="+encodeURIComponent(assessment)}><button>Open assessor dashboard</button></a><button onClick={()=>setStage("declare")}>Start new candidate</button></section>}
- {stage==="result"&&result&&<section><h2>AI-assisted preliminary result</h2><h1>{result.evaluation?.overall_percentage}%</h1><p>Theory-only preliminary result. Practical rubric scoring and final sign-off are assessor-controlled.</p><p>Recommendation: {result.recommendation?.provisional_outcome}</p><p>Final authority: human assessor. Evidence authenticity, rubric overrides and certification/sign-off remain assessor-controlled.</p></section>}
- {new URLSearchParams(location.search).get("assessor")&&<Assessor assessmentId={new URLSearchParams(location.search).get("assessor")!} tasks={tasks} online={online}/>} {error&&<p className="error">{error}</p>}</main>
+type Task = {
+  id: string;
+  title: string;
+  instructions: string;
+  safety: string;
+  max_score: number;
+  rubric: { criterion: string; weight: number }[];
+};
+
+type EvidenceItem = {
+  id: string;
+  assessment_id: string;
+  task_id: string;
+  name: string;
+  type: string;
+  blob: File;
+  sync_status: string;
+};
+
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      ["packages", "attempts", "evidence"].forEach((name) => {
+        if (!db.objectStoreNames.contains(name)) {
+          db.createObjectStore(name, { keyPath: "id" });
+        }
+      });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 }
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);
+
+async function put(store: string, value: unknown) {
+  const db = await openDB();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(store, "readwrite");
+    tx.objectStore(store).put(value);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function get<T>(store: string, id: string): Promise<T | undefined> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, "readonly");
+    const request = tx.objectStore(store).get(id);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getAll<T>(store: string): Promise<T[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, "readonly");
+    const request = tx.objectStore(store).getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function App() {
+  const [online, setOnline] = useState(navigator.onLine);
+  const [stage, setStage] = useState("declare");
+  const [candidate, setCandidate] = useState<Candidate>({
+    name: "",
+    age: 18,
+    years_experience: 0,
+    occupation: "Construction Electrician",
+    work_context: "",
+    prior_training: "",
+  });
+  const [jobId, setJobId] = useState("");
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [assessmentId, setAssessmentId] = useState("");
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [evidence, setEvidence] = useState<Record<string, EvidenceItem[]>>({});
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    navigator.serviceWorker?.register("/sw.js").catch(() => undefined);
+
+    const updateNetwork = () => setOnline(navigator.onLine);
+    window.addEventListener("online", updateNetwork);
+    window.addEventListener("offline", updateNetwork);
+
+    fetch(API + "/practical/tasks")
+      .then((response) => response.json())
+      .then((data) => setTasks(data.tasks || []))
+      .catch(() => undefined);
+
+    return () => {
+      window.removeEventListener("online", updateNetwork);
+      window.removeEventListener("offline", updateNetwork);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!jobId || !online) return;
+
+    const timer = window.setInterval(async () => {
+      const response = await fetch(API + "/jobs/" + jobId);
+      const job = await response.json();
+
+      if (job.status === "completed") {
+        await put("packages", {
+          id: "construction-electrician",
+          questions: job.result.questions,
+        });
+        setQuestions(job.result.questions);
+        setJobId("");
+        setStage("test");
+      }
+
+      if (job.status === "failed") {
+        setError(job.error || "Question generation failed.");
+        setJobId("");
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [jobId, online]);
+
+  useEffect(() => {
+    if (!online) return;
+
+    getAll<any>("attempts")
+      .then((attempts) =>
+        attempts
+          .filter((item) => item.sync_status === "queued")
+          .forEach((item) => syncSubmission(item.payload))
+      )
+      .catch(() => undefined);
+
+    syncEvidence().catch(() => undefined);
+  }, [online]);
+
+  async function generatePackage() {
+    setError("");
+
+    if (!online) {
+      setError("Connect once to download the assessment package.");
+      return;
+    }
+
+    const mappingResponse = await fetch(API + "/declarations/map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate),
+    });
+    const mapping = await mappingResponse.json();
+
+    if (!mapping.qp_code) {
+      setError("This demo currently supports Construction Electrician - LV.");
+      return;
+    }
+
+    const response = await fetch(API + "/jobs/questions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qp_code: mapping.qp_code, count: 12 }),
+    });
+    const data = await response.json();
+
+    setJobId(data.job_id);
+    setStage("waiting");
+  }
+
+  async function useOfflinePackage() {
+    const packageData = await get<any>("packages", "construction-electrician");
+
+    if (!packageData) {
+      setError("No downloaded assessment package is available offline.");
+      return;
+    }
+
+    setQuestions(packageData.questions);
+    setStage("test");
+  }
+
+  async function submitTheory() {
+    setError("");
+
+    if (Object.keys(answers).length !== questions.length) {
+      setError("Answer every question before the single submission.");
+      return;
+    }
+
+    const id = "assessment_" + crypto.randomUUID();
+    const payload = {
+      assessment_id: id,
+      candidate_id: candidate.name || "offline-candidate",
+      qp_code: "CON/Q0603",
+      candidate,
+      answers: questions.map((question) => ({
+        ...question,
+        selected_option: answers[question.id],
+      })),
+      practical_scores: [],
+    };
+
+    await put("attempts", {
+      id,
+      payload,
+      sync_status: online ? "pending" : "queued",
+    });
+
+    setAssessmentId(id);
+    setStage("practical");
+
+    if (online) {
+      await syncSubmission(payload);
+    }
+  }
+
+  async function syncSubmission(payload: any) {
+    try {
+      const response = await fetch(API + "/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+
+      if (!result.accepted) {
+        setError(result.reason || "Assessment has already been submitted.");
+        return false;
+      }
+
+      await put("attempts", {
+        id: payload.assessment_id,
+        payload,
+        sync_status: "submitted",
+      });
+
+      return true;
+    } catch {
+      setError("Submission is queued locally until connectivity returns.");
+      return false;
+    }
+  }
+
+  async function captureEvidence(task: Task) {
+    if (!assessmentId) {
+      setError("Submit the theory assessment first.");
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*,video/*";
+    input.capture = "environment";
+
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      const item: EvidenceItem = {
+        id: "evidence_" + crypto.randomUUID(),
+        assessment_id: assessmentId,
+        task_id: task.id,
+        name: file.name,
+        type: file.type,
+        blob: file,
+        sync_status: "pending",
+      };
+
+      await put("evidence", item);
+      setEvidence((current) => ({
+        ...current,
+        [task.id]: [...(current[task.id] || []), item],
+      }));
+
+      if (online) await syncEvidence();
+    };
+
+    input.click();
+  }
+
+  async function syncEvidence() {
+    if (!navigator.onLine) return;
+
+    const items = await getAll<EvidenceItem>("evidence");
+
+    for (const item of items.filter((value) => value.sync_status !== "synced")) {
+      const form = new FormData();
+      form.append("assessment_id", item.assessment_id);
+      form.append("task_id", item.task_id);
+      form.append("media", item.blob, item.name);
+
+      try {
+        await fetch(API + "/evidence", { method: "POST", body: form });
+        item.sync_status = "synced";
+        await put("evidence", item);
+      } catch {
+        // Keep the item queued for the next reconnect.
+      }
+    }
+  }
+
+  async function finishSubmission() {
+    const saved = await get<any>("attempts", assessmentId);
+    if (!saved) return;
+
+    if (online) {
+      await syncSubmission(saved.payload);
+      setStage("submitted");
+    } else {
+      await put("attempts", {
+        ...saved,
+        sync_status: "queued",
+      });
+      setStage("submitted");
+    }
+  }
+
+  const assessorId = new URLSearchParams(window.location.search).get("assessor");
+
+  return (
+    <main>
+      <header>
+        <div>
+          <strong>RPL Skill Assessment</strong>
+          <span>Construction Electrician · NSQF Level 4</span>
+        </div>
+        <b className={online ? "online" : "offline"}>
+          {online ? "Online" : "Offline"}
+        </b>
+      </header>
+
+      {stage === "declare" && (
+        <section>
+          <h1>Recognition of Prior Learning</h1>
+          <p>
+            Structured self-declaration maps prior work experience to the
+            qualification framework. AI assists the process; the assessor
+            makes the final decision.
+          </p>
+
+          <input
+            placeholder="Worker name"
+            value={candidate.name}
+            onChange={(event) =>
+              setCandidate({ ...candidate, name: event.target.value })
+            }
+          />
+
+          <input
+            type="number"
+            placeholder="Age"
+            value={candidate.age}
+            onChange={(event) =>
+              setCandidate({ ...candidate, age: Number(event.target.value) })
+            }
+          />
+
+          <input
+            type="number"
+            placeholder="Years of experience"
+            value={candidate.years_experience}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                years_experience: Number(event.target.value),
+              })
+            }
+          />
+
+          <textarea
+            placeholder="Work context and tasks performed"
+            value={candidate.work_context}
+            onChange={(event) =>
+              setCandidate({ ...candidate, work_context: event.target.value })
+            }
+          />
+
+          <textarea
+            placeholder="Prior training or certificates"
+            value={candidate.prior_training}
+            onChange={(event) =>
+              setCandidate({
+                ...candidate,
+                prior_training: event.target.value,
+              })
+            }
+          />
+
+          <button onClick={generatePackage}>Download assessment package</button>
+
+          {!online && (
+            <button onClick={useOfflinePackage}>
+              Use downloaded package
+            </button>
+          )}
+        </section>
+      )}
+
+      {stage === "waiting" && (
+        <section>
+          <h2>Preparing assessment package</h2>
+          <p>
+            The question-generation job is running asynchronously.
+            Job ID: <code>{jobId}</code>
+          </p>
+          <p>The completed package will be saved locally for offline use.</p>
+        </section>
+      )}
+
+      {stage === "test" && (
+        <section>
+          <h2>Theory assessment</h2>
+          <p>One attempt. Answer all questions before submitting.</p>
+
+          {questions.map((question, index) => (
+            <article key={question.id}>
+              <small>
+                {index + 1}. {question.nos_code} / {question.pc_id}
+              </small>
+              <h3>{question.question}</h3>
+
+              {question.options.map((option: string, optionIndex: number) => (
+                <label key={optionIndex}>
+                  <input
+                    type="radio"
+                    name={question.id}
+                    checked={answers[question.id] === optionIndex}
+                    onChange={() =>
+                      setAnswers({
+                        ...answers,
+                        [question.id]: optionIndex,
+                      })
+                    }
+                  />
+                  {option}
+                </label>
+              ))}
+            </article>
+          ))}
+
+          <button onClick={submitTheory}>Submit single attempt</button>
+        </section>
+      )}
+
+      {stage === "practical" && (
+        <section>
+          <h2>Practical evidence</h2>
+          <p>
+            Capture evidence for the assessor. Practical scores are never
+            entered by the worker.
+          </p>
+
+          {tasks.map((task) => (
+            <article key={task.id}>
+              <h3>
+                {task.id} — {task.title}
+              </h3>
+              <p>{task.instructions}</p>
+              <p>
+                <strong>Safety:</strong> {task.safety}
+              </p>
+
+              <ul>
+                {task.rubric.map((criterion) => (
+                  <li key={criterion.criterion}>
+                    {criterion.criterion} — {criterion.weight} points
+                  </li>
+                ))}
+              </ul>
+
+              <button onClick={() => captureEvidence(task)}>
+                Capture photo/video
+              </button>
+
+              <small>
+                Evidence attached: {(evidence[task.id] || []).length}
+              </small>
+            </article>
+          ))}
+
+          <button onClick={finishSubmission}>Finish submission</button>
+        </section>
+      )}
+
+      {stage === "submitted" && (
+        <section>
+          <h2>Assessment submitted</h2>
+          <p>
+            Assessment ID: <code>{assessmentId}</code>
+          </p>
+          <p>
+            The assessor can now review the declaration, evidence and practical
+            rubric.
+          </p>
+
+          <a href={"?assessor=" + encodeURIComponent(assessmentId)}>
+            <button>Open assessor dashboard</button>
+          </a>
+        </section>
+      )}
+
+      {assessorId && (
+        <AssessorDashboard
+          assessmentId={assessorId}
+          tasks={tasks}
+          online={online}
+        />
+      )}
+
+      {error && <p className="error">{error}</p>}
+    </main>
+  );
+}
+
+function AssessorDashboard({
+  assessmentId,
+  tasks,
+  online,
+}: {
+  assessmentId: string;
+  tasks: Task[];
+  online: boolean;
+}) {
+  const [view, setView] = useState<any>(null);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!online) return;
+
+    fetch(API + "/assessor/" + assessmentId)
+      .then((response) => response.json())
+      .then(setView)
+      .catch(() => setMessage("Could not load assessor data."));
+  }, [assessmentId, online]);
+
+  async function evaluate() {
+    const practicalScores = tasks.map((task) => ({
+      task_id: task.id,
+      score: Math.min(
+        task.max_score,
+        Math.max(0, Number(scores[task.id] || 0))
+      ),
+      max_score: task.max_score,
+      assessor_id: "demo-assessor",
+    }));
+
+    const response = await fetch(
+      API + "/assessor/" + assessmentId + "/evaluate",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assessor_id: "demo-assessor",
+          practical_scores: practicalScores,
+        }),
+      }
+    );
+
+    const job = await response.json();
+
+    if (!job.job_id) {
+      setMessage(job.reason || "Evaluation could not be started.");
+      return;
+    }
+
+    let result;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      result = await fetch(API + "/jobs/" + job.job_id).then((r) => r.json());
+    } while (result.status === "queued" || result.status === "running");
+
+    if (result.status !== "completed") {
+      setMessage(result.error || "Evaluation failed.");
+      return;
+    }
+
+    setView((current: any) => ({
+      ...current,
+      evaluation: result.result,
+    }));
+    setMessage("AI-assisted evaluation is ready for assessor review.");
+  }
+
+  async function signOff() {
+    await fetch(API + "/assessor/" + assessmentId + "/signoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assessor_id: "demo-assessor",
+        decision: "approved_after_review",
+        remarks: "Assessor reviewed the evidence and AI-assisted scoring.",
+      }),
+    });
+
+    setMessage("Assessor sign-off recorded.");
+  }
+
+  if (!view) {
+    return (
+      <section>
+        <h2>Assessor dashboard</h2>
+        <p>Loading assessment...</p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <h2>Assessor dashboard</h2>
+      <p>
+        Assessment: <code>{assessmentId}</code>
+      </p>
+
+      <h3>Self-declaration</h3>
+      <pre>{JSON.stringify(view.submission?.candidate, null, 2)}</pre>
+
+      <h3>Evidence</h3>
+      {view.evidence?.length ? (
+        view.evidence.map((item: any) => (
+          <p key={item.evidence_id}>
+            {item.task_id} — {item.filename} ({item.media_type})
+          </p>
+        ))
+      ) : (
+        <p>No evidence uploaded.</p>
+      )}
+
+      <h3>Practical scoring</h3>
+      {tasks.map((task) => (
+        <article key={task.id}>
+          <strong>
+            {task.id} — {task.title}
+          </strong>
+          <p>
+            {task.rubric
+              .map((item) => item.criterion + " (" + item.weight + ")")
+              .join(", ")}
+          </p>
+          <input
+            type="number"
+            min="0"
+            max={task.max_score}
+            placeholder={"Score / " + task.max_score}
+            onChange={(event) =>
+              setScores({
+                ...scores,
+                [task.id]: Number(event.target.value),
+              })
+            }
+          />
+        </article>
+      ))}
+
+      <button onClick={evaluate}>Run AI-assisted evaluation</button>
+
+      {view.evaluation && (
+        <div className="result">
+          <h3>Competency evaluation</h3>
+          <h1>{view.evaluation.overall_percentage}%</h1>
+          <p>
+            Provisional outcome:{" "}
+            {view.evaluation.provisional_pass
+              ? "Meets threshold"
+              : "Gaps identified"}
+          </p>
+
+          <h4>NOS results</h4>
+          {view.evaluation.nos_results?.map((item: any) => (
+            <p key={item.nos_code}>
+              <strong>{item.nos_code}</strong> — {item.name}:{" "}
+              {item.practical_percentage ?? item.theory_percentage}%
+            </p>
+          ))}
+
+          <p>AI output is advisory. The assessor retains final authority.</p>
+          <button onClick={signOff}>Sign off assessment</button>
+        </div>
+      )}
+
+      {message && <p>{message}</p>}
+    </section>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
