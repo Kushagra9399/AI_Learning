@@ -284,7 +284,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
 
   return (
     <Shell user={user} onLogout={onLogout}>
-      <section className="page-heading"><div><p className="eyebrow">WORKER PORTAL</p><h1>Overview</h1><p className="muted">Track your RPL assessment from declaration through submission.</p></div></section><p className="muted">Your progress is saved on the server and will remain available after refresh.</p></div></section>
+      <section className="page-heading"><p className="eyebrow">WORKER PORTAL</p><h1>Overview</h1><p className="muted">Track your RPL assessment from declaration through submission.</p></section><p className="muted">Your progress is saved on the server and will remain available after refresh.</p>
 
       {!assessment && (
         <section className="panel">
