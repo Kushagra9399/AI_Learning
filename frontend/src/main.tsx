@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 
 const API = "http://localhost:8000/api";
+const NSQF_LEVELS = [1, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 8] as const;
+type NsqfLevel = typeof NSQF_LEVELS[number];
 const TOKEN_KEY = "rpl_access_token";
 
 type Role = "admin" | "worker";
@@ -351,6 +353,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   const [message, setMessage] = useState("");
   const [jobId, setJobId] = useState("");
   const [gradingMarks, setGradingMarks] = useState<Record<string, number>>({});
+  const [selectedLevel, setSelectedLevel] = useState<NsqfLevel | "">("");
 
   async function loadList() {
     try { setAssessments(await api("/admin/assessments")); }
@@ -362,6 +365,8 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
       const data = await api(`/admin/candidate/${id}`);
       setSelected(data);
       setQuestions(data.questions_draft || data.questions || []);
+      if (data.level != null && NSQF_LEVELS.includes(Number(data.level) as NsqfLevel)) setSelectedLevel(Number(data.level) as NsqfLevel);
+      else if (data.level_suggestion?.suggested_level != null && NSQF_LEVELS.includes(Number(data.level_suggestion.suggested_level) as NsqfLevel)) setSelectedLevel(Number(data.level_suggestion.suggested_level) as NsqfLevel);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load assessment"); }
   }
 
@@ -403,8 +408,8 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
 
   async function approveLevel() {
     if (!selected || selected.level_approved) return;
-    const level = selected.level_suggestion?.suggested_level;
-    if (!level) return;
+    const level = selectedLevel;
+    if (level === "") return;
     try {
       await api("/admin/level-approval", {method:"POST",body:JSON.stringify({
         assessment_id:selected.assessment_id, nsqf_level:level, suggestion:selected.level_suggestion
@@ -506,11 +511,16 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
               <label>Prior training / certificates<textarea value={selected.candidate.prior_training || "No prior training listed"} readOnly /></label>
             </div>
             <section className="result">
-              <h3>NSQF recommendation</h3>
-              {selected.level_suggestion ? <><div className="recommendation">Level {selected.level_suggestion.suggested_level}</div><p>{selected.level_suggestion.reason}</p><small>Confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
+              <h3>NSQF level</h3>
+              {selected.level_suggestion ? <><label>Recommended / selected level
+                <select value={selectedLevel} onChange={e=>setSelectedLevel(Number(e.target.value) as NsqfLevel)} disabled={selected.level_approved}>
+                  <option value="">Select NSQF level</option>
+                  {NSQF_LEVELS.map(level=><option key={level} value={level}>Level {level}</option>)}
+                </select>
+              </label><p>{selected.level_suggestion.reason}</p><small>AI confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
               <div className="actions">
                 {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
-                <button onClick={approveLevel} disabled={selected.level_approved || !selected.level_suggestion}>Approve & lock level</button>
+                <button onClick={approveLevel} disabled={selected.level_approved || selectedLevel === ""}>Approve & lock level</button>
               </div>
             </section>
           </section>}
