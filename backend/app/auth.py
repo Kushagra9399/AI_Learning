@@ -85,7 +85,7 @@ def create_access_token(user):
 
 
 def authenticate(name, password):
-    user = store.get_user_by_name(name.strip())
+    user = store.get_user_by_username(name.strip())
     if not user:
         password_hash.verify(password, DUMMY_HASH)
         return None
