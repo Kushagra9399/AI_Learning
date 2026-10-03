@@ -594,6 +594,21 @@ class Store:
             connection.execute("UPDATE assessments SET grading=?, marks_locked=1, marks_locked_at=? WHERE assessment_id=? AND marks_locked=0", (json.dumps(grading_record), grading_record["locked_at"], assessment_id))
         return {"accepted": True, "assessment_id": assessment_id, **grading_record}
 
+    def worker_result(self, assessment_id, worker_user_id):
+        row = self._assessment(assessment_id)
+        if not row or row["worker_user_id"] != worker_user_id:
+            return None
+        if not row["marks_locked"]:
+            return {"assessment_id": assessment_id, "locked": False, "total_marks": None, "max_marks": None}
+        grading = self._json_or_none(row["grading"]) or {}
+        return {
+            "assessment_id": assessment_id,
+            "locked": True,
+            "total_marks": grading.get("total_marks", 0),
+            "max_marks": grading.get("max_marks", 0),
+            "locked_at": row["marks_locked_at"],
+        }
+
     def add_evidence(self, evidence_id, assessment_id, task_id, filename, media_type, path, worker_user_id):
         with self._connection() as connection:
             row = connection.execute(
