@@ -90,3 +90,41 @@ AI may help organize evidence, generate question wording and calculate standardi
 ## Reference
 
 Official QP: https://s3.ap-south-1.amazonaws.com/nsdcproddocuments/qpPdf/CON_Q0603_v5.0.pdf
+
+
+## Authentication and persistent workflow
+
+The RPL application uses role-based JWT authentication with two roles:
+
+- **Admin**: manages worker assessments, reviews AI recommendations, approves and locks the NSQF level, and reviews/approves generated question packages.
+- **Worker**: submits their declaration, sees only their own persisted assessment, and can start/submit only after administrator approval.
+
+Assessment state is stored in SQLite. AI question generation is persisted as a **draft** before administrator approval. Once the NSQF level is approved it is immutable, and the API rejects new AI level recommendations for that assessment. Once questions are approved, the active question package is immutable through the generation flow.
+
+### Authentication configuration
+
+Copy `backend/.env.example` to `backend/.env` and set:
+
+```env
+JWT_SECRET=<long-random-secret>
+ADMIN_PASSWORD=<admin-password>
+WORKER_PASSWORD=<worker-password>
+```
+
+The default usernames created at startup are `admin` and `worker`. Passwords are hashed with Argon2; JWTs are used for authenticated API access.
+
+Start the backend and frontend normally:
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# another terminal
+cd frontend
+npm install
+npm run dev
+```
+
+Open the frontend at `http://localhost:5173`. The application always starts at the login screen and selects the dashboard from the authenticated user's server-side role.
