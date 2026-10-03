@@ -224,7 +224,7 @@ async def upload_evidence(
     assessment_id: str = Form(...),
     task_id: str = Form(...),
     media: UploadFile = File(...),
-    worker: WorkerUser = Depends(),
+    worker: WorkerUser,
 ):
     evidence_id = "ev_" + __import__("uuid").uuid4().hex[:12]
     filename = Path(media.filename or "evidence.bin").name
