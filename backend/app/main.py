@@ -235,6 +235,22 @@ def submit_assessment(payload: dict, worker: WorkerUser):
     return store.submit(payload, worker["id"])
 
 
+@app.post("/api/admin/assessments/{assessment_id}/grading/lock")
+def lock_assessment_grading(assessment_id: str, payload: dict, _: AdminUser):
+    result = store.lock_grading(assessment_id, payload)
+    if not result.get("accepted"):
+        raise HTTPException(status_code=409, detail=result.get("reason", "Unable to lock grading"))
+    return result
+
+
+@app.get("/api/worker/assessment/{assessment_id}/result")
+def get_worker_result(assessment_id: str, worker: WorkerUser):
+    result = store.worker_result(assessment_id, worker["id"])
+    if result is None:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    return result
+
+
 @app.post("/api/evidence")
 async def upload_evidence(
     worker: WorkerUser,
