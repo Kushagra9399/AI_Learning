@@ -3,3 +3,6 @@ uvicorn
 pydantic
 httpx
 python-multipart
+PyJWT
+pwdlib[argon2]
+python-multipart
