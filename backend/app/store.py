@@ -15,10 +15,7 @@ class Store:
         self._init_database()
 
     def _connection(self):
-        connection = sqlite3.connect(
-            self.db,
-            check_same_thread=False,
-        )
+        connection = sqlite3.connect(self.db, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -30,6 +27,14 @@ class Store:
         with self._connection() as connection:
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'worker')),
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
                     type TEXT,
@@ -51,10 +56,12 @@ class Store:
 
                 CREATE TABLE IF NOT EXISTS assessments (
                     assessment_id TEXT PRIMARY KEY,
+                    worker_user_id INTEGER,
                     candidate TEXT,
                     level INTEGER,
                     level_suggestion TEXT,
                     level_approved INTEGER DEFAULT 0,
+                    questions_draft TEXT,
                     questions TEXT,
                     questions_approved INTEGER DEFAULT 0,
                     started INTEGER DEFAULT 0,
@@ -78,26 +85,106 @@ class Store:
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(assessments)"
+                ).fetchall()
+            }
+            migrations = {
+                "worker_user_id": "ALTER TABLE assessments ADD COLUMN worker_user_id INTEGER",
+                "questions_draft": "ALTER TABLE assessments ADD COLUMN questions_draft TEXT",
+            }
+            for name, statement in migrations.items():
+                if name not in columns:
+                    connection.execute(statement)
 
-    def ensure_assessment(self, assessment_id, candidate):
+    def create_user(self, username, password_hash, role):
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO assessments
-                (assessment_id, candidate, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO users (username, password_hash, role, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (username, password_hash, role, self._now()),
+            )
+
+    def get_user_by_username(self, username):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE username=?",
+                (username,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_user(self, user_id):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT id, username, role, created_at FROM users WHERE id=?",
+                (user_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_worker_assessment(self, worker_user_id, candidate):
+        with self._connection() as connection:
+            existing = connection.execute(
+                """
+                SELECT assessment_id, level, level_suggestion,
+                       level_approved, questions_approved, started
+                FROM assessments
+                WHERE worker_user_id=?
+                  AND assessment_id NOT IN (
+                      SELECT assessment_id FROM submissions
+                  )
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (worker_user_id,),
+            ).fetchone()
+
+            if existing:
+                return {
+                    "assessment_id": existing["assessment_id"],
+                    "existing": True,
+                    "level": existing["level"],
+                    "level_suggestion": (
+                        json.loads(existing["level_suggestion"])
+                        if existing["level_suggestion"]
+                        else None
+                    ),
+                    "level_approved": bool(existing["level_approved"]),
+                    "questions_approved": bool(existing["questions_approved"]),
+                    "started": bool(existing["started"]),
+                }
+
+            assessment_id = "assessment_" + uuid.uuid4().hex[:12]
+            connection.execute(
+                """
+                INSERT INTO assessments
+                (assessment_id, worker_user_id, candidate, created_at)
+                VALUES (?, ?, ?, ?)
                 """,
                 (
                     assessment_id,
+                    worker_user_id,
                     json.dumps(candidate),
                     self._now(),
                 ),
             )
 
+        return {
+            "assessment_id": assessment_id,
+            "existing": False,
+            "level": None,
+            "level_suggestion": None,
+            "level_approved": False,
+            "questions_approved": False,
+            "started": False,
+        }
+
     def job(self, kind, payload):
         job_id = "job_" + uuid.uuid4().hex[:12]
         now = self._now()
-
         with self._connection() as connection:
             connection.execute(
                 """
@@ -107,19 +194,10 @@ class Store:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    job_id,
-                    kind,
-                    "queued",
-                    0,
-                    None,
-                    None,
-                    json.dumps(payload),
-                    0,
-                    now,
-                    now,
+                    job_id, kind, "queued", 0, None, None,
+                    json.dumps(payload), 0, now, now,
                 ),
             )
-
         return {"id": job_id, "status": "queued"}
 
     def run_async(self, job, function):
@@ -130,22 +208,15 @@ class Store:
                         "UPDATE jobs SET status='running', progress=20, updated_at=? WHERE id=?",
                         (self._now(), job["id"]),
                     )
-
                 result = function()
-
                 with self._connection() as connection:
                     connection.execute(
                         """
                         UPDATE jobs
-                        SET status='completed', progress=100, result=?,
-                            updated_at=?
+                        SET status='completed', progress=100, result=?, updated_at=?
                         WHERE id=?
                         """,
-                        (
-                            json.dumps(result),
-                            self._now(),
-                            job["id"],
-                        ),
+                        (json.dumps(result), self._now(), job["id"]),
                     )
             except Exception as exc:
                 with self._connection() as connection:
@@ -158,76 +229,113 @@ class Store:
                         (str(exc), self._now(), job["id"]),
                     )
 
-        threading.Thread(
-            target=runner,
-            daemon=True,
-        ).start()
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _assessment(self, assessment_id):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM assessments WHERE assessment_id=?",
+                (assessment_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def save_level_suggestion(self, assessment_id, suggestion):
         with self._connection() as connection:
-            connection.execute(
+            row = connection.execute(
                 """
-                UPDATE assessments
-                SET level_suggestion=?
-                WHERE assessment_id=?
+                SELECT level_approved FROM assessments WHERE assessment_id=?
                 """,
+                (assessment_id,),
+            ).fetchone()
+            if not row or row["level_approved"]:
+                return False
+            connection.execute(
+                "UPDATE assessments SET level_suggestion=? WHERE assessment_id=?",
                 (json.dumps(suggestion), assessment_id),
             )
+        return True
 
     def approve_level(self, payload):
         assessment_id = payload["assessment_id"]
-        self.ensure_assessment(
-            assessment_id,
-            payload.get("candidate", {}),
-        )
+        level = int(payload["nsqf_level"])
+        if not 1 <= level <= 8:
+            return {"approved": False, "reason": "invalid_nsqf_level"}
 
         with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT level, level_approved
+                FROM assessments WHERE assessment_id=?
+                """,
+                (assessment_id,),
+            ).fetchone()
+            if not row:
+                return {"approved": False, "reason": "assessment_not_found"}
+            if row["level_approved"]:
+                return {
+                    "assessment_id": assessment_id,
+                    "approved": False,
+                    "reason": "level_already_approved",
+                    "level": row["level"],
+                }
+
             connection.execute(
                 """
                 UPDATE assessments
                 SET level=?, level_suggestion=?, level_approved=1
-                WHERE assessment_id=?
+                WHERE assessment_id=? AND level_approved=0
                 """,
-                (
-                    int(payload["nsqf_level"]),
-                    json.dumps(payload.get("suggestion", {})),
-                    assessment_id,
-                ),
+                (level, json.dumps(payload.get("suggestion", {})), assessment_id),
             )
 
-        return {
-            "assessment_id": assessment_id,
-            "level": int(payload["nsqf_level"]),
-            "approved": True,
-        }
+        return {"assessment_id": assessment_id, "level": level, "approved": True}
+
+    def save_question_draft(self, assessment_id, questions):
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT level_approved, questions_approved
+                FROM assessments WHERE assessment_id=?
+                """,
+                (assessment_id,),
+            ).fetchone()
+            if not row or not row["level_approved"] or row["questions_approved"]:
+                return False
+            connection.execute(
+                """
+                UPDATE assessments SET questions_draft=?
+                WHERE assessment_id=? AND questions_approved=0
+                """,
+                (json.dumps(questions), assessment_id),
+            )
+        return True
 
     def approve_questions(self, payload):
         questions = payload.get("questions", [])
-
         with self._connection() as connection:
-            result = connection.execute(
+            row = connection.execute(
+                """
+                SELECT level_approved, questions_approved, questions_draft
+                FROM assessments WHERE assessment_id=?
+                """,
+                (payload["assessment_id"],),
+            ).fetchone()
+            if not row:
+                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "assessment_not_found"}
+            if not row["level_approved"]:
+                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "level_not_approved"}
+            if row["questions_approved"]:
+                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "questions_already_approved"}
+
+            connection.execute(
                 """
                 UPDATE assessments
-                SET questions=?, questions_approved=1
-                WHERE assessment_id=? AND level_approved=1
+                SET questions=?, questions_draft=NULL, questions_approved=1
+                WHERE assessment_id=? AND questions_approved=0
                 """,
-                (
-                    json.dumps(questions),
-                    payload["assessment_id"],
-                ),
+                (json.dumps(questions), payload["assessment_id"]),
             )
-
-        if result.rowcount == 0:
-            return {
-                "assessment_id": payload["assessment_id"],
-                "approved": False,
-                "reason": "level_not_approved_or_assessment_not_found",
-            }
-
-        return {
-            "assessment_id": payload["assessment_id"],
-            "approved": True,
-        }
+        return {"assessment_id": payload["assessment_id"], "approved": True}
 
     def get_job(self, job_id):
         with self._connection() as connection:
@@ -235,20 +343,14 @@ class Store:
                 "SELECT * FROM jobs WHERE id=?",
                 (job_id,),
             ).fetchone()
-
         if not row:
             return None
-
         return {
             "id": row["id"],
             "type": row["type"],
             "status": row["status"],
             "progress": row["progress"],
-            "result": (
-                json.loads(row["result"])
-                if row["result"]
-                else None
-            ),
+            "result": json.loads(row["result"]) if row["result"] else None,
             "error": row["error"],
             "acknowledged": bool(row["acknowledged"]),
         }
@@ -260,77 +362,108 @@ class Store:
                 (job_id,),
             )
 
+    @staticmethod
+    def _candidate(row):
+        return json.loads(row["candidate"]) if row["candidate"] else {}
+
+    @staticmethod
+    def _json_or_none(value):
+        return json.loads(value) if value else None
+
     def admin_candidate(self, assessment_id):
-        with self._connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM assessments WHERE assessment_id=?",
-                (assessment_id,),
-            ).fetchone()
-
+        row = self._assessment(assessment_id)
         if not row:
-            return {"assessment_id": assessment_id}
-
-        return dict(row)
-
-    def user_assessment(self, assessment_id):
-        with self._connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM assessments WHERE assessment_id=?",
-                (assessment_id,),
-            ).fetchone()
-
-        if not row:
-            return {"exists": False}
-
+            return None
         return {
-            "exists": True,
             "assessment_id": assessment_id,
+            "candidate": self._candidate(row),
             "level": row["level"],
+            "level_suggestion": self._json_or_none(row["level_suggestion"]),
             "level_approved": bool(row["level_approved"]),
-            "questions": (
-                json.loads(row["questions"])
-                if row["questions"] and row["questions_approved"]
-                else None
-            ),
+            "questions_draft": self._json_or_none(row["questions_draft"]),
+            "questions": self._json_or_none(row["questions"]),
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
-            "submitted": self.has_submission(assessment_id),
         }
 
-    def start_assessment(self, assessment_id):
+    def admin_assessments(self):
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT assessment_id, candidate, level, level_approved,
+                       questions_approved, started, created_at
+                FROM assessments
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+        result = []
+        for row in rows:
+            candidate = self._candidate(row)
+            result.append(
+                {
+                    "assessment_id": row["assessment_id"],
+                    "candidate": candidate,
+                    "level": row["level"],
+                    "level_approved": bool(row["level_approved"]),
+                    "questions_approved": bool(row["questions_approved"]),
+                    "started": bool(row["started"]),
+                    "created_at": row["created_at"],
+                }
+            )
+        return result
+
+    def worker_assessment(self, worker_user_id):
         with self._connection() as connection:
             row = connection.execute(
                 """
-                SELECT started, questions_approved
-                FROM assessments
-                WHERE assessment_id=?
+                SELECT * FROM assessments
+                WHERE worker_user_id=?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (worker_user_id,),
+            ).fetchone()
+        if not row:
+            return {"exists": False}
+
+        questions = self._json_or_none(row["questions"])
+        return {
+            "exists": True,
+            "assessment_id": row["assessment_id"],
+            "candidate": self._candidate(row),
+            "level": row["level"],
+            "level_approved": bool(row["level_approved"]),
+            "questions": questions if row["questions_approved"] else None,
+            "questions_approved": bool(row["questions_approved"]),
+            "started": bool(row["started"]),
+            "submitted": self.has_submission(row["assessment_id"]),
+        }
+
+    def user_assessment(self, assessment_id, worker_user_id):
+        row = self._assessment(assessment_id)
+        if not row or row["worker_user_id"] != worker_user_id:
+            return {"exists": False}
+        return self.worker_assessment(worker_user_id)
+
+    def start_assessment(self, assessment_id, worker_user_id):
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT started, questions_approved, worker_user_id
+                FROM assessments WHERE assessment_id=?
                 """,
                 (assessment_id,),
             ).fetchone()
-
-            if not row:
-                return {
-                    "accepted": False,
-                    "reason": "assessment_not_found",
-                }
-
+            if not row or row["worker_user_id"] != worker_user_id:
+                return {"accepted": False, "reason": "assessment_not_found"}
             if not row["questions_approved"]:
-                return {
-                    "accepted": False,
-                    "reason": "questions_not_approved",
-                }
-
+                return {"accepted": False, "reason": "questions_not_approved"}
             if row["started"]:
-                return {
-                    "accepted": False,
-                    "reason": "attempt_already_started",
-                }
-
+                return {"accepted": False, "reason": "attempt_already_started"}
             connection.execute(
                 "UPDATE assessments SET started=1 WHERE assessment_id=?",
                 (assessment_id,),
             )
-
         return {"accepted": True, "started": True}
 
     def has_submission(self, assessment_id):
@@ -341,21 +474,20 @@ class Store:
             ).fetchone()
         return row is not None
 
-    def submit(self, payload):
+    def submit(self, payload, worker_user_id):
         assessment_id = payload["assessment_id"]
-
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT started FROM assessments WHERE assessment_id=?",
+                """
+                SELECT started, worker_user_id
+                FROM assessments WHERE assessment_id=?
+                """,
                 (assessment_id,),
             ).fetchone()
-
-            if not row or not row["started"]:
-                return {
-                    "accepted": False,
-                    "reason": "assessment_not_started",
-                }
-
+            if not row or row["worker_user_id"] != worker_user_id:
+                return {"accepted": False, "reason": "assessment_not_found"}
+            if not row["started"]:
+                return {"accepted": False, "reason": "assessment_not_started"}
             try:
                 connection.execute(
                     """
@@ -363,50 +495,29 @@ class Store:
                     (assessment_id, payload, created_at)
                     VALUES (?, ?, ?)
                     """,
-                    (
-                        assessment_id,
-                        json.dumps(payload),
-                        self._now(),
-                    ),
+                    (assessment_id, json.dumps(payload), self._now()),
                 )
             except sqlite3.IntegrityError:
-                return {
-                    "accepted": False,
-                    "reason": "single_attempt_already_submitted",
-                }
+                return {"accepted": False, "reason": "single_attempt_already_submitted"}
+        return {"accepted": True, "assessment_id": assessment_id}
 
-        return {
-            "accepted": True,
-            "assessment_id": assessment_id,
-        }
-
-    def add_evidence(
-        self,
-        evidence_id,
-        assessment_id,
-        task_id,
-        filename,
-        media_type,
-        path,
-    ):
+    def add_evidence(self, evidence_id, assessment_id, task_id, filename, media_type, path, worker_user_id):
         with self._connection() as connection:
+            row = connection.execute(
+                "SELECT worker_user_id FROM assessments WHERE assessment_id=?",
+                (assessment_id,),
+            ).fetchone()
+            if not row or row["worker_user_id"] != worker_user_id:
+                return False
             connection.execute(
                 """
                 INSERT INTO evidence
-                (evidence_id, assessment_id, task_id, filename,
-                 media_type, path, created_at)
+                (evidence_id, assessment_id, task_id, filename, media_type, path, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    evidence_id,
-                    assessment_id,
-                    task_id,
-                    filename,
-                    media_type,
-                    path,
-                    self._now(),
-                ),
+                (evidence_id, assessment_id, task_id, filename, media_type, path, self._now()),
             )
+        return True
 
     def assessor(self, assessment_id):
         with self._connection() as connection:
@@ -425,26 +536,16 @@ class Store:
             evidence = connection.execute(
                 """
                 SELECT evidence_id, task_id, filename, media_type, created_at
-                FROM evidence
-                WHERE assessment_id=?
+                FROM evidence WHERE assessment_id=?
                 """,
                 (assessment_id,),
             ).fetchall()
-
         return {
             "assessment_id": assessment_id,
-            "submission": (
-                json.loads(submission["payload"])
-                if submission
-                else None
-            ),
+            "submission": json.loads(submission["payload"]) if submission else None,
             "assessment": dict(assessment) if assessment else None,
             "evidence": [dict(item) for item in evidence],
-            "signoff": (
-                json.loads(signoff["payload"])
-                if signoff
-                else None
-            ),
+            "signoff": json.loads(signoff["payload"]) if signoff else None,
             "final_authority": "human_assessor",
         }
 
@@ -456,13 +557,8 @@ class Store:
                 (assessment_id, payload, created_at)
                 VALUES (?, ?, ?)
                 """,
-                (
-                    assessment_id,
-                    json.dumps(payload),
-                    self._now(),
-                ),
+                (assessment_id, json.dumps(payload), self._now()),
             )
-
         return {
             "assessment_id": assessment_id,
             "signed_off": True,
