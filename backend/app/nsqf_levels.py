@@ -472,6 +472,8 @@ NSQF_LEVEL_DESCRIPTORS = {
 }
 
 
+NSQF_LEVEL_OPTIONS = [1, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 8]
+
 # The current LLM integration intentionally receives only Levels 1–5.
 # Once a proper NQR qualification/descriptor API is available, this boundary
 # can be raised without changing the stored descriptor data.
