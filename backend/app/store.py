@@ -449,6 +449,16 @@ class Store:
             )
         return result
 
+    @staticmethod
+    def _worker_questions(questions):
+        safe = []
+        for question in questions or []:
+            item = dict(question)
+            item.pop("correct_option", None)
+            item.pop("rubric", None)
+            safe.append(item)
+        return safe
+
     def worker_assessment(self, worker_user_id):
         with self._connection() as connection:
             row = connection.execute(
@@ -464,6 +474,7 @@ class Store:
             return {"exists": False}
 
         questions = self._json_or_none(row["questions"])
+        safe_questions = self._worker_questions(questions)
         return {
             "exists": True,
             "assessment_id": row["assessment_id"],
@@ -471,7 +482,7 @@ class Store:
             "level": row["level"],
             "level_suggestion": self._json_or_none(row["level_suggestion"]),
             "level_approved": bool(row["level_approved"]),
-            "questions": questions if row["questions_approved"] else None,
+            "questions": safe_questions if row["questions_approved"] else None,
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
             "marks_locked": bool(row["marks_locked"]),
