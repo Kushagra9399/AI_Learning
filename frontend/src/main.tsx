@@ -401,8 +401,16 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
       const data = await api(`/admin/candidate/${id}`);
       setSelected(data);
       setQuestions(data.questions_draft || data.questions || []);
-      if (data.level != null && NSQF_LEVELS.includes(Number(data.level) as NsqfLevel)) setSelectedLevel(Number(data.level) as NsqfLevel);
-      else if (data.level_suggestion?.suggested_level != null && NSQF_LEVELS.includes(Number(data.level_suggestion.suggested_level) as NsqfLevel)) setSelectedLevel(Number(data.level_suggestion.suggested_level) as NsqfLevel);
+
+      // Approval state comes only from the persisted backend flag.
+      // Before approval, the AI recommendation is the default dropdown value.
+      if (data.level_approved && data.level != null && NSQF_LEVELS.includes(Number(data.level) as NsqfLevel)) {
+        setSelectedLevel(Number(data.level) as NsqfLevel);
+      } else if (!data.level_approved && data.level_suggestion?.suggested_level != null && NSQF_LEVELS.includes(Number(data.level_suggestion.suggested_level) as NsqfLevel)) {
+        setSelectedLevel(Number(data.level_suggestion.suggested_level) as NsqfLevel);
+      } else {
+        setSelectedLevel("");
+      }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load assessment"); }
   }
 
@@ -548,15 +556,21 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
             </div>
             <section className="result">
               <h3>NSQF level</h3>
-              {selected.level_suggestion ? <><label>Recommended / selected level
+              <label>NSQF level
                 <select value={selectedLevel} onChange={e=>setSelectedLevel(Number(e.target.value) as NsqfLevel)} disabled={selected.level_approved}>
                   <option value="">Select NSQF level</option>
                   {NSQF_LEVELS.map(level=><option key={level} value={level}>Level {level}</option>)}
                 </select>
-              </label><p>{selected.level_suggestion.reason}</p><small>AI confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
+              </label>
+              {selected.level_suggestion ? <>
+                <p>{selected.level_suggestion.reason}</p>
+                <small>AI recommendation: Level {selected.level_suggestion.suggested_level} · Confidence: {selected.level_suggestion.confidence}</small>
+              </> : <p className="muted">No AI recommendation yet. Run the recommendation to preselect a level.</p>}
               <div className="actions">
                 {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
-                <button onClick={approveLevel} disabled={selected.level_approved || selectedLevel === ""}>Approve & lock level</button>
+                {!selected.level_approved
+                  ? <button onClick={approveLevel} disabled={selectedLevel === ""}>Approve & lock level</button>
+                  : <span className="badge approved">LEVEL LOCKED</span>}
               </div>
             </section>
           </section>}
