@@ -44,6 +44,9 @@ type Assessment = {
   submitted_at?: string | null;
   submission?: any;
   evidence?: any[];
+  grading?: { items?: any[]; total_marks?: number; max_marks?: number; locked?: boolean; locked_at?: string } | null;
+  marks_locked?: boolean;
+  marks_locked_at?: string | null;
 };
 
 function token() {
@@ -173,6 +176,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
   const [files, setFiles] = useState<Record<string, File>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [workerResult, setWorkerResult] = useState<any>(null);
 
   async function load() {
     try {
@@ -180,6 +184,9 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
       if (data.exists) {
         setAssessment(data);
         if (data.candidate) setCandidate(data.candidate);
+        if (data.exists && data.assessment_id) {
+          try { setWorkerResult(await api(`/worker/assessment/${data.assessment_id}/result`)); } catch { setWorkerResult(null); }
+        }
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load assessment");
@@ -268,7 +275,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
   if (assessment && page === "/worker/submission") {
     return <Shell user={user} onLogout={onLogout}>
       <section className="page-heading"><p className="eyebrow">SUBMISSION</p><h1>Assessment submission</h1><p className="muted">Your final attempt and current workflow status.</p></section>
-      <section className="panel">{assessment.submitted ? <><div className="status-banner success"><strong>Assessment submitted</strong><span>{assessment.submitted_at ? new Date(assessment.submitted_at).toLocaleString() : ""}</span></div>{(assessment.submission?.answers || []).map((q:any,i:number)=><article className="question-card" key={q.id || i}><div className="question-meta">QUESTION {i+1}</div><h3>{q.question}</h3><p><strong>Response:</strong> {q.options?.length ? (q.selected_option >= 0 ? q.options[q.selected_option] : "Not answered") : (q.response || "Not answered")}</p></article>)}</> : <p className="muted">You have not submitted your assessment.</p>}</section>
+      <section className="panel">{assessment.submitted ? <><div className="status-banner success"><strong>Assessment submitted</strong><span>{assessment.submitted_at ? new Date(assessment.submitted_at).toLocaleString() : ""}</span></div>{workerResult?.locked && <div className="score-card"><span>Final score</span><strong>{workerResult.total_marks} / {workerResult.max_marks}</strong><small>Marks locked by administrator</small></div>}{(assessment.submission?.answers || []).map((q:any,i:number)=><article className="question-card" key={q.id || i}><div className="question-meta">QUESTION {i+1}</div><h3>{q.question}</h3><p><strong>Response:</strong> {q.options?.length ? (q.selected_option >= 0 ? q.options[q.selected_option] : "Not answered") : (q.response || "Not answered")}</p></article>)}</> : <p className="muted">You have not submitted your assessment.</p>}</section>
     </Shell>;
   }
   if (assessment && page === "/worker/assessment") {
@@ -325,7 +332,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
             </article>
           ))}<button onClick={submit}>Submit assessment</button></section>}
 
-          {hasSubmitted && <section className="panel success"><h2>Assessment submitted</h2><p>Your one-time attempt has been recorded. Further review is handled by the administrator.</p></section>}
+          {hasSubmitted && <section className="panel success"><h2>Assessment submitted</h2><p>Your one-time attempt has been recorded. Further review is handled by the administrator.</p>{workerResult?.locked && <div className="score-card"><span>Final score</span><strong>{workerResult.total_marks} / {workerResult.max_marks}</strong><small>Marks have been finalized by the administrator.</small></div>}</section>}
         </>
       )}
       {message && <p className="notice">{message}</p>}
