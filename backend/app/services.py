@@ -2,10 +2,14 @@ import json
 import os
 
 import httpx
+from dotenv import load_dotenv
+from pathlib import Path
 
 from .practical import practical_percentage, validate_scores
 from .qp import QP, THEORY_QUESTIONS
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
