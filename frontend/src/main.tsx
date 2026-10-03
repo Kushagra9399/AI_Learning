@@ -41,6 +41,9 @@ type Assessment = {
   questions_approved: boolean;
   started: boolean;
   submitted?: boolean;
+  submitted_at?: string | null;
+  submission?: any;
+  evidence?: any[];
 };
 
 function token() {
@@ -291,7 +294,11 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load assessment"); }
   }
 
-  useEffect(() => { loadList(); }, []);
+  useEffect(() => {
+    loadList();
+    const timer = window.setInterval(loadList, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!jobId) return;
@@ -373,6 +380,37 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
         {selected ? <section className="panel">
           <div className="panel-header"><div><h2>{selected.candidate.name || "Worker assessment"}</h2><p className="muted">{selected.assessment_id}</p></div><span className={`badge ${selected.level_approved?"approved":"pending"}`}>{selected.level_approved?"LEVEL LOCKED":"REVIEW REQUIRED"}</span></div>
           <div className="candidate-box"><strong>{selected.candidate.occupation}</strong><p>{selected.candidate.work_context}</p><small>{selected.candidate.years_experience} years experience · {selected.candidate.prior_training || "No prior training listed"}</small></div>
+          <section className="result">
+            <div className="panel-header">
+              <h3>Worker submission</h3>
+              <span className={`badge ${selected.submitted ? "approved" : "pending"}`}>
+                {selected.submitted ? "SUBMITTED" : "NOT SUBMITTED"}
+              </span>
+            </div>
+            {selected.submitted && selected.submission ? (
+              <>
+                <p className="muted">Submitted {selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ""}</p>
+                <div className="submission-summary">
+                  {(selected.submission.answers || []).map((answer:any, index:number) => (
+                    <article className="question-card" key={answer.id || index}>
+                      <div className="question-meta">QUESTION {index + 1} · {answer.type || "TEXT"} · {answer.marks || 0} marks</div>
+                      <h3>{answer.question}</h3>
+                      {answer.options?.length ? (
+                        <p><strong>Selected:</strong> {answer.selected_option >= 0 ? answer.options[answer.selected_option] : "Not answered"}</p>
+                      ) : (
+                        <p><strong>Response:</strong> {answer.response || "Not answered"}</p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+                {selected.evidence?.length > 0 && (
+                  <p className="muted">Evidence files submitted: {selected.evidence.length}</p>
+                )}
+              </>
+            ) : (
+              <p className="muted">The worker has not submitted the assessment yet.</p>
+            )}
+          </section>
           <section className="result">
             <h3>NSQF recommendation</h3>
             {selected.level_suggestion ? <><div className="recommendation">Level {selected.level_suggestion.suggested_level}</div><p>{selected.level_suggestion.reason}</p><small>Confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
