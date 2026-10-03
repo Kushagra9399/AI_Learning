@@ -152,6 +152,13 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
+    def update_user_identity(self, user_id, name, phone, dob):
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE users SET name=?, phone=?, dob=? WHERE id=?",
+                (name, phone, dob, user_id),
+            )
+
     def get_user(self, user_id):
         with self._connection() as connection:
             row = connection.execute(
