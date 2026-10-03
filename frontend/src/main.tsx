@@ -488,8 +488,11 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   async function approveQuestions() {
     if (!selected || selected.questions_approved || !questions.length) return;
     try {
-      await api("/admin/questions/approve", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id})});
+      // Persist the current admin edits first. Approval itself reads only from DB.
+      await api("/admin/questions/draft", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id,questions})});
+      const approved = await api("/admin/questions/approve", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id})});
       await loadAssessment(selected.assessment_id);
+      if (approved.questions) setQuestions(approved.questions);
       await loadList();
       setMessage("Question package approved and activated for the worker.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to approve questions"); }
