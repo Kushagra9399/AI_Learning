@@ -335,6 +335,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
 
 function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [route,setRoute]=useState(window.location.pathname);
+  const [detailTab,setDetailTab]=useState<"worker"|"questions"|"answers">("worker");
   useEffect(()=>{const h=()=>setRoute(window.location.pathname);window.addEventListener("popstate",h);return()=>window.removeEventListener("popstate",h)},[]);
   const [assessments, setAssessments] = useState<any[]>([]);
   const [selected, setSelected] = useState<Assessment | null>(null);
@@ -446,54 +447,73 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
 
         {selected ? <section className="panel">
           <div className="panel-header"><div><h2>{selected.candidate.name || "Worker assessment"}</h2><p className="muted">{selected.assessment_id}</p></div><span className={`badge ${selected.level_approved?"approved":"pending"}`}>{selected.level_approved?"LEVEL LOCKED":"REVIEW REQUIRED"}</span></div>
-          <div className="candidate-box"><strong>{selected.candidate.occupation}</strong><p>{selected.candidate.work_context}</p><small>{selected.candidate.years_experience} years experience · {selected.candidate.prior_training || "No prior training listed"}</small></div>
-          <section className="result">
+
+          <div className="detail-tabs" role="tablist" aria-label="Assessment details">
+            <button className={detailTab==="worker" ? "detail-tab active" : "detail-tab"} onClick={()=>setDetailTab("worker")}>Worker inputs</button>
+            <button className={detailTab==="questions" ? "detail-tab active" : "detail-tab"} onClick={()=>setDetailTab("questions")}>Question paper</button>
+            <button className={detailTab==="answers" ? "detail-tab active" : "detail-tab"} onClick={()=>setDetailTab("answers")}>Worker answers</button>
+          </div>
+
+          {detailTab==="worker" && <section className="detail-pane">
+            <div className="candidate-box">
+              <h3>Worker information</h3>
+              <div className="form-grid readonly-grid">
+                <label>Name<input value={selected.candidate.name} readOnly /></label>
+                <label>Age<input value={selected.candidate.age} readOnly /></label>
+                <label>Years of experience<input value={selected.candidate.years_experience} readOnly /></label>
+                <label>Occupation<input value={selected.candidate.occupation} readOnly /></label>
+              </div>
+              <label>Work performed / skills<textarea value={selected.candidate.work_context} readOnly /></label>
+              <label>Prior training / certificates<textarea value={selected.candidate.prior_training || "No prior training listed"} readOnly /></label>
+            </div>
+            <section className="result">
+              <h3>NSQF recommendation</h3>
+              {selected.level_suggestion ? <><div className="recommendation">Level {selected.level_suggestion.suggested_level}</div><p>{selected.level_suggestion.reason}</p><small>Confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
+              <div className="actions">
+                {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
+                <button onClick={approveLevel} disabled={selected.level_approved || !selected.level_suggestion}>Approve & lock level</button>
+              </div>
+            </section>
+          </section>}
+
+          {detailTab==="questions" && <section className="detail-pane">
             <div className="panel-header">
-              <h3>Worker submission</h3>
-              <span className={`badge ${selected.submitted ? "approved" : "pending"}`}>
-                {selected.submitted ? "SUBMITTED" : "NOT SUBMITTED"}
-              </span>
+              <div><h3>Question paper</h3><p className="muted">{selected.questions_approved ? "Approved and locked" : "Draft — editable until approval"}</p></div>
+              <span className={`badge ${selected.questions_approved ? "approved" : "pending"}`}>{selected.questions_approved ? "LOCKED" : "DRAFT"}</span>
             </div>
-            {selected.submitted && selected.submission ? (
-              <>
-                <p className="muted">Submitted {selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ""}</p>
-                <div className="submission-summary">
-                  {(selected.submission.answers || []).map((answer:any, index:number) => (
-                    <article className="question-card" key={answer.id || index}>
-                      <div className="question-meta">QUESTION {index + 1} · {answer.type || "TEXT"} · {answer.marks || 0} marks</div>
-                      <h3>{answer.question}</h3>
-                      {answer.options?.length ? (
-                        <p><strong>Selected:</strong> {answer.selected_option >= 0 ? answer.options[answer.selected_option] : "Not answered"}</p>
-                      ) : (
-                        <p><strong>Response:</strong> {answer.response || "Not answered"}</p>
-                      )}
-                    </article>
-                  ))}
-                </div>
-                {selected.evidence?.length > 0 && (
-                  <p className="muted">Evidence files submitted: {selected.evidence.length}</p>
-                )}
-              </>
-            ) : (
-              <p className="muted">The worker has not submitted the assessment yet.</p>
-            )}
-          </section>
-          <section className="result">
-            <h3>NSQF recommendation</h3>
-            {selected.level_suggestion ? <><div className="recommendation">Level {selected.level_suggestion.suggested_level}</div><p>{selected.level_suggestion.reason}</p><small>Confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
-            <div className="actions">
-              {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
-              <button onClick={approveLevel} disabled={selected.level_approved || !selected.level_suggestion}>Approve & lock level</button>
-            </div>
-          </section>
-          <section className="result">
-            <h3>Question package</h3>
-            <p className="muted">{selected.level_approved ? `Questions will be generated for locked NSQF Level ${selected.level}.` : "Approve the level before generating questions."}</p>
-            <button onClick={generateQuestions} disabled={!selected.level_approved || selected.questions_approved}>Generate questions</button>
-            {(questions.length > 0) && <div className="question-editor">{questions.map((q,i) => <article className="question-card" key={q.id}><input value={q.question} onChange={e=>updateQuestion(i,{question:e.target.value})}/><div className="inline-fields"><select value={q.type} onChange={e=>updateQuestion(i,{type:e.target.value as Question["type"]})}><option value="mcq">MCQ</option><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option></select><input type="number" min="1" max="10" value={q.marks} onChange={e=>updateQuestion(i,{marks:Number(e.target.value)})}/></div><button className="danger" onClick={()=>setQuestions(current=>current.filter((_,x)=>x!==i))}>Delete</button></article>)}</div>}
+            <p className="muted">{selected.level_approved ? `NSQF Level ${selected.level} · ${questions.length} questions` : "Approve the level before generating questions."}</p>
+            {!selected.questions_approved && <button onClick={generateQuestions} disabled={!selected.level_approved}>Generate questions</button>}
+            {questions.length > 0 && <div className="question-editor">
+              {questions.map((q,i) => selected.questions_approved ? (
+                <article className="question-card locked-question" key={q.id}>
+                  <div className="question-meta">QUESTION {i+1} · {q.type.toUpperCase()} · {q.marks} MARKS</div>
+                  <h3>{q.question}</h3>
+                  {q.options?.length ? <ol className="question-options">{q.options.map((option,j)=><li key={j}>{option}</li>)}</ol> : null}
+                  <span className="lock-note">Approved question · read only</span>
+                </article>
+              ) : (
+                <article className="question-card" key={q.id}>
+                  <input value={q.question} onChange={e=>updateQuestion(i,{question:e.target.value})}/>
+                  {q.options?.length ? <div className="question-options-editor">{q.options.map((option,j)=><input key={j} value={option} onChange={e=>updateQuestion(i,{options:q.options?.map((x,k)=>k===j?e.target.value:x)})}/>)}</div> : null}
+                  <div className="inline-fields"><select value={q.type} onChange={e=>updateQuestion(i,{type:e.target.value as Question["type"]})}><option value="mcq">MCQ</option><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option></select><input type="number" min="1" max="10" value={q.marks} onChange={e=>updateQuestion(i,{marks:Number(e.target.value)})}/></div>
+                  <button className="danger" onClick={()=>setQuestions(current=>current.filter((_,x)=>x!==i))}>Delete</button>
+                </article>
+              ))}
+            </div>}
             {!selected.questions_approved && <button onClick={approveQuestions} disabled={!questions.length}>Approve & activate assessment</button>}
-            {selected.questions_approved && <p className="success-text">Approved questions are active for the worker. They cannot be replaced by a new AI recommendation.</p>}
-          </section>
+          </section>}
+
+          {detailTab==="answers" && <section className="detail-pane">
+            <div className="panel-header"><div><h3>Worker answers</h3><p className="muted">{selected.submitted ? `Submitted ${selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ""}` : "Not submitted yet"}</p></div><span className={`badge ${selected.submitted ? "approved" : "pending"}`}>{selected.submitted ? "SUBMITTED" : "PENDING"}</span></div>
+            {selected.submitted && selected.submission ? <div className="submission-summary">
+              {(selected.submission.answers || []).map((answer:any,index:number)=><article className="question-card" key={answer.id || index}>
+                <div className="question-meta">QUESTION {index+1} · {answer.type || "TEXT"} · {answer.marks || 0} MARKS</div>
+                <h3>{answer.question}</h3>
+                {answer.options?.length ? <p><strong>Selected:</strong> {answer.selected_option >= 0 ? answer.options[answer.selected_option] : "Not answered"}</p> : <p><strong>Response:</strong> {answer.response || "Not answered"}</p>}
+              </article>)}
+              {selected.evidence?.length > 0 && <p className="muted">Evidence files submitted: {selected.evidence.length}</p>}
+            </div> : <div className="empty"><p className="muted">The worker has not submitted the assessment yet.</p></div>}
+          </section>}
         </section> : <section className="panel empty"><h2>Select an assessment</h2><p className="muted">Choose a worker from the list to review their declaration and assessment state.</p></section>}
       </div>
       {message && <p className="notice">{message}</p>}
