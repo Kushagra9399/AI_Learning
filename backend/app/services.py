@@ -5,6 +5,7 @@ import httpx
 from dotenv import load_dotenv
 from pathlib import Path
 
+from .nsqf_levels import NSQF_LEVEL_DESCRIPTORS, prompt_level_descriptors
 from .practical import practical_percentage, validate_scores
 from .qp import QP, THEORY_QUESTIONS
 
