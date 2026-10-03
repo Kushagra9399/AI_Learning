@@ -395,7 +395,6 @@ class Store:
         return True
 
     def approve_questions(self, payload):
-        questions = payload.get("questions", [])
         with self._connection() as connection:
             row = connection.execute(
                 """
@@ -411,6 +410,10 @@ class Store:
             if row["questions_approved"]:
                 return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "questions_already_approved"}
 
+            questions = self._json_or_none(row["questions_draft"]) or []
+            if not questions:
+                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "no_question_draft"}
+
             connection.execute(
                 """
                 UPDATE assessments
@@ -419,7 +422,18 @@ class Store:
                 """,
                 (json.dumps(questions), payload["assessment_id"]),
             )
-        return {"assessment_id": payload["assessment_id"], "approved": True}
+
+            saved = connection.execute(
+                "SELECT questions, questions_approved FROM assessments WHERE assessment_id=?",
+                (payload["assessment_id"],),
+            ).fetchone()
+
+        return {
+            "assessment_id": payload["assessment_id"],
+            "approved": True,
+            "questions_approved": bool(saved["questions_approved"]),
+            "questions": self._worker_questions(self._json_or_none(saved["questions"])),
+        }
 
     def get_job(self, job_id):
         with self._connection() as connection:
