@@ -242,6 +242,14 @@ def approve_level(payload: dict, _: AdminUser):
     return store.approve_level(payload)
 
 
+@app.post("/api/admin/assessments/{assessment_id}/level-unlock")
+def unlock_level(assessment_id: str, _: AdminUser):
+    result = store.unlock_level(assessment_id)
+    if not result.get("unlocked"):
+        raise HTTPException(status_code=409, detail=result.get("reason", "Unable to unlock level"))
+    return result
+
+
 @app.post("/api/admin/questions/generate")
 def create_question_job(payload: dict, _: AdminUser):
     assessment_id = payload["assessment_id"]
@@ -253,7 +261,7 @@ def create_question_job(payload: dict, _: AdminUser):
     if candidate["questions_approved"]:
         raise HTTPException(status_code=409, detail="Questions are already approved and active")
 
-    level = int(candidate["level"])
+    level = float(candidate["level"])
     job = store.job("question_generation", payload)
 
     def process_questions():
