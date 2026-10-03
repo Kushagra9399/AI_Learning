@@ -7,3 +7,37 @@
 
 .answer-card{position:relative;transition:border-color .15s,background .15s}.answer-correct{border-left:4px solid #12b76a;background:#f6fef9}.answer-incorrect{border-left:4px solid #f04438;background:#fff8f7}.answer-badge{display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;vertical-align:middle}.answer-badge.correct{background:#dcfae6;color:#067647}.answer-badge.incorrect{background:#fee4e2;color:#b42318}.answer-badge.unanswered{background:#f2f4f7;color:#667085}.grading-header-actions{display:flex;align-items:center;gap:12px}.total-score{font-size:18px}.manual-marking{display:flex;align-items:end;gap:12px;margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #eaecf0;border-radius:8px}.manual-marking label{display:grid;gap:5px;font-weight:600}.manual-marking input{width:120px}.manual-marking small,.marking-note{color:#667085;font-size:11px;font-weight:400}.grading-footer{display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding:18px;border-top:1px solid #eaecf0;background:#fcfcfd;border-radius:8px}.grading-footer div{display:grid;gap:4px}.grading-footer span{color:#667085;font-size:12px}.grading-footer strong{font-size:24px}.score-card{display:flex;align-items:center;gap:16px;padding:16px 18px;margin:16px 0;border:1px solid #b7ebcd;background:#f6fef9;border-radius:10px}.score-card span{color:#475467;font-size:13px}.score-card strong{font-size:24px;color:#067647}.score-card small{color:#667085}
 @media(max-width:700px){.grading-header-actions{flex-wrap:wrap}.manual-marking{align-items:stretch;flex-direction:column}.grading-footer{align-items:stretch;flex-direction:column;gap:14px}}
+
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 20px 0;
+  padding: 4px;
+  border: 1px solid #d8dee8;
+  border-radius: 10px;
+  background: #f5f7fa;
+}
+
+.auth-tabs button {
+  margin: 0;
+  background: transparent;
+  color: #5d6878;
+  border: 0;
+  box-shadow: none;
+}
+
+.auth-tabs button.active {
+  background: #ffffff;
+  color: #18212f;
+  box-shadow: 0 1px 3px rgba(20, 30, 45, 0.12);
+}
+
+.auth-help {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #687385;
+  text-align: center;
+}

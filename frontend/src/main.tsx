@@ -74,30 +74,50 @@ async function api(path: string, options: RequestInit = {}) {
 }
 
 function Login({ onLogin }: { onLogin: (user: User) => void }) {
-  const [username, setUsername] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [dob, setDob] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function resetForm() {
+    setName(""); setPhone(""); setDob(""); setPassword("");
+    setError(""); setMessage("");
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    setLoading(true);
-    setError("");
+    setLoading(true); setError(""); setMessage("");
     try {
-      const body = new URLSearchParams();
-      body.set("username", username);
-      body.set("password", password);
+      const payload = { name: name.trim(), phone: phone.trim(), dob, password };
+      if (mode === "signup") {
+        const response = await fetch(API + "/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Unable to create worker account");
+        setMessage("Worker account created. Sign in with your registered details.");
+        setMode("signin");
+        setPassword("");
+        return;
+      }
+
       const response = await fetch(API + "/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Invalid username or password");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || "Invalid sign-in details");
       localStorage.setItem(TOKEN_KEY, data.access_token);
       onLogin(data.user);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Login failed");
+      setError(error instanceof Error ? error.message : "Authentication failed");
     } finally {
       setLoading(false);
     }
@@ -109,12 +129,24 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
         <div className="brand-mark">RPL</div>
         <h1>Recognition of Prior Learning</h1>
         <p className="muted">AI-assisted skill assessment platform</p>
+        <div className="auth-tabs">
+          <button type="button" className={mode === "signin" ? "active" : ""} onClick={() => { resetForm(); setMode("signin"); }}>Sign in</button>
+          <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { resetForm(); setMode("signup"); }}>Worker sign up</button>
+        </div>
         <form onSubmit={submit}>
-          <label>Username<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required /></label>
-          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+          <label>Full name<input value={name} onChange={e => setName(e.target.value)} autoComplete="name" required /></label>
+          <label>Phone number<input type="tel" value={phone} onChange={e => setPhone(e.target.value)} autoComplete="tel" required /></label>
+          <label>Date of birth<input type="date" value={dob} onChange={e => setDob(e.target.value)} autoComplete="bday" required /></label>
+          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} required /></label>
           {error && <p className="error">{error}</p>}
-          <button disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button>
+          {message && <p className="notice">{message}</p>}
+          <button disabled={loading}>{loading ? (mode === "signup" ? "Creating account..." : "Signing in...") : (mode === "signup" ? "Create worker account" : "Sign in")}</button>
         </form>
+        <p className="auth-help">
+          {mode === "signin"
+            ? "Workers can create an account from Worker sign up. Administrator accounts are provisioned separately."
+            : "Worker registration is open here. Administrator accounts cannot be created from this page."}
+        </p>
       </section>
     </main>
   );
@@ -607,7 +639,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (user && (window.location.pathname === "/" || window.location.pathname === "/login")) {
+    if (user && (window.location.pathname === "/" || (window.location.pathname === "/login" || window.location.pathname === "/signup"))) {
       navigate(user.role === "admin" ? "/admin/dashboard" : "/worker/dashboard");
     }
   }, [user]);

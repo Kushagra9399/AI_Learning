@@ -27,12 +27,45 @@ DUMMY_HASH = password_hash.hash("invalid-password-placeholder")
 
 def seed_default_users():
     defaults = [
-        ("admin", os.getenv("ADMIN_PASSWORD", ""), "admin"),
-        ("worker", os.getenv("WORKER_PASSWORD", ""), "worker"),
+        (
+            "admin",
+            os.getenv("ADMIN_PASSWORD", ""),
+            os.getenv("ADMIN_NAME", "Administrator"),
+            os.getenv("ADMIN_PHONE", "admin"),
+            os.getenv("ADMIN_DOB", "1900-01-01"),
+            "admin",
+        ),
+        (
+            "worker",
+            os.getenv("WORKER_PASSWORD", ""),
+            os.getenv("WORKER_NAME", "Default Worker"),
+            os.getenv("WORKER_PHONE", "worker"),
+            os.getenv("WORKER_DOB", "1900-01-01"),
+            "worker",
+        ),
     ]
-    for username, password, role in defaults:
-        if password and not store.get_user_by_username(username):
-            store.create_user(username, password_hash.hash(password), role)
+
+    for username, password, name, phone, dob, role in defaults:
+        if not password:
+            continue
+        existing = store.get_user_by_username(username)
+        if existing:
+            if existing["role"] == role:
+                store.update_user_identity(
+                    existing["id"],
+                    name=name.strip(),
+                    phone=phone.strip(),
+                    dob=dob.strip(),
+                )
+            continue
+        store.create_user(
+            username=username,
+            name=name.strip(),
+            phone=phone.strip(),
+            dob=dob.strip(),
+            password_hash=password_hash.hash(password),
+            role=role,
+        )
 
 
 def create_access_token(user):
@@ -41,6 +74,9 @@ def create_access_token(user):
     payload = {
         "sub": str(user["id"]),
         "username": user["username"],
+        "name": user["name"],
+        "phone": user["phone"],
+        "dob": user["dob"],
         "role": user["role"],
         "exp": datetime.now(timezone.utc)
         + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -48,8 +84,8 @@ def create_access_token(user):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def authenticate(username, password):
-    user = store.get_user_by_username(username)
+def authenticate(name, phone, dob, password):
+    user = store.get_user_by_identity(name.strip(), phone.strip(), dob.strip())
     if not user:
         password_hash.verify(password, DUMMY_HASH)
         return None

@@ -30,6 +30,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    phone TEXT,
+                    dob TEXT,
                     password_hash TEXT NOT NULL,
                     role TEXT NOT NULL CHECK(role IN ('admin', 'worker')),
                     created_at TEXT NOT NULL
@@ -85,6 +88,16 @@ class Store:
                 );
                 """
             )
+            user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+            user_migrations = {
+                "name": "ALTER TABLE users ADD COLUMN name TEXT",
+                "phone": "ALTER TABLE users ADD COLUMN phone TEXT",
+                "dob": "ALTER TABLE users ADD COLUMN dob TEXT",
+            }
+            for name, statement in user_migrations.items():
+                if name not in user_columns:
+                    connection.execute(statement)
+
             columns = {
                 row["name"]
                 for row in connection.execute(
@@ -102,15 +115,18 @@ class Store:
                 if name not in columns:
                     connection.execute(statement)
 
-    def create_user(self, username, password_hash, role):
+    def create_user(self, username, name, phone, dob, password_hash, role):
         with self._connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
-                INSERT INTO users (username, password_hash, role, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users
+                (username, name, phone, dob, password_hash, role, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (username, password_hash, role, self._now()),
+                (username, name, phone, dob, password_hash, role, self._now()),
             )
+            user_id = cursor.lastrowid
+        return self.get_user(user_id)
 
     def get_user_by_username(self, username):
         with self._connection() as connection:
@@ -120,10 +136,33 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_user_by_phone(self, phone):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE phone=?",
+                (phone,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_identity(self, name, phone, dob):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE lower(name)=lower(?) AND phone=? AND dob=?",
+                (name, phone, dob),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_user_identity(self, user_id, name, phone, dob):
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE users SET name=?, phone=?, dob=? WHERE id=?",
+                (name, phone, dob, user_id),
+            )
+
     def get_user(self, user_id):
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT id, username, role, created_at FROM users WHERE id=?",
+                "SELECT * FROM users WHERE id=?",
                 (user_id,),
             ).fetchone()
         return dict(row) if row else None
