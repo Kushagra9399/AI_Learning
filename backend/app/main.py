@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -52,17 +53,71 @@ def health():
     return {"status": "ok", "groq_configured": bool(os.getenv("GROQ_API_KEY"))}
 
 
+class LoginRequest(BaseModel):
+    name: str
+    password: str
+    phone: str
+    dob: str
+
+
+class WorkerSignupRequest(BaseModel):
+    name: str
+    password: str
+    phone: str
+    dob: str
+
+
 @app.post("/api/auth/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate(form_data.username.strip(), form_data.password)
+def login(payload: LoginRequest):
+    user = authenticate(payload.name, payload.phone, payload.dob, payload.password)
     if not user:
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
+        raise HTTPException(status_code=401, detail="Incorrect name, password, phone number or date of birth")
     return {
         "access_token": create_access_token(user),
         "token_type": "bearer",
         "user": {
             "id": user["id"],
             "username": user["username"],
+            "name": user["name"],
+            "phone": user["phone"],
+            "dob": user["dob"],
+            "role": user["role"],
+        },
+    }
+
+
+@app.post("/api/auth/signup")
+def signup(payload: WorkerSignupRequest):
+    name = payload.name.strip()
+    phone = payload.phone.strip()
+    dob = payload.dob.strip()
+
+    if not name or not phone or not dob or not payload.password:
+        raise HTTPException(status_code=400, detail="Name, password, phone number and date of birth are required")
+
+    if store.get_user_by_phone(phone):
+        raise HTTPException(status_code=409, detail="A user with this phone number already exists")
+
+    if store.get_user_by_identity(name, phone, dob):
+        raise HTTPException(status_code=409, detail="Worker account already exists")
+
+    from .auth import password_hash
+    user = store.create_user(
+        username=phone,
+        name=name,
+        phone=phone,
+        dob=dob,
+        password_hash=password_hash.hash(payload.password),
+        role="worker",
+    )
+    return {
+        "message": "Worker account created successfully",
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "name": user["name"],
+            "phone": user["phone"],
+            "dob": user["dob"],
             "role": user["role"],
         },
     }
@@ -73,6 +128,9 @@ def me(current_user: CurrentUser):
     return {
         "id": current_user["id"],
         "username": current_user["username"],
+        "name": current_user["name"],
+        "phone": current_user["phone"],
+        "dob": current_user["dob"],
         "role": current_user["role"],
     }
 
