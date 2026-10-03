@@ -129,11 +129,15 @@ def _groq(system_prompt: str, user_prompt: str, max_tokens: int = 1800):
 
 
 def level_context(level: int):
-    return LEVEL_CONTEXT.get(int(level), LEVEL_CONTEXT[4])
+    return NSQF_LEVEL_DESCRIPTORS.get(int(level), NSQF_LEVEL_DESCRIPTORS[4])
 
 
 def _compact_level_context(level: int) -> str:
     return json.dumps(level_context(level), separators=(",", ":"))
+
+
+def _prompt_nsqf_context() -> str:
+    return json.dumps(prompt_level_descriptors(), separators=(",", ":"))
 
 
 def infer_level(candidate: dict) -> dict:
