@@ -139,7 +139,7 @@ class Store:
                   AND assessment_id NOT IN (
                       SELECT assessment_id FROM submissions
                   )
-                ORDER BY a.created_at DESC
+                ORDER BY created_at DESC
                 LIMIT 1
                 """,
                 (worker_user_id,),
