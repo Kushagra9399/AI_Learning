@@ -29,16 +29,16 @@ def seed_default_users():
     defaults = [
         (
             "admin",
-            os.getenv("ADMIN_PASSWORD", ""),
-            os.getenv("ADMIN_NAME", "Administrator"),
+            os.getenv("ADMIN_PASSWORD", "adin"),
+            os.getenv("ADMIN_NAME", "admin"),
             os.getenv("ADMIN_PHONE", "admin"),
             os.getenv("ADMIN_DOB", "1900-01-01"),
             "admin",
         ),
         (
             "worker",
-            os.getenv("WORKER_PASSWORD", ""),
-            os.getenv("WORKER_NAME", "Default Worker"),
+            os.getenv("WORKER_PASSWORD", "worker"),
+            os.getenv("WORKER_NAME", "worker"),
             os.getenv("WORKER_PHONE", "worker"),
             os.getenv("WORKER_DOB", "1900-01-01"),
             "worker",
