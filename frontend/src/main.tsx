@@ -63,7 +63,7 @@ async function api(path: string, options: RequestInit = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(API + path, { ...options, headers });
+  const response = await fetch(API + path, { ...options, headers, cache: "no-store" });
   if (response.status === 401) {
     localStorage.removeItem(TOKEN_KEY);
     window.location.reload();
