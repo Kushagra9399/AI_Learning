@@ -26,22 +26,45 @@ DUMMY_HASH = password_hash.hash("invalid-password-placeholder")
 
 
 def seed_default_users():
-    password = os.getenv("ADMIN_PASSWORD", "")
-    if not password:
-        return
+    defaults = [
+        (
+            "admin",
+            os.getenv("ADMIN_PASSWORD", ""),
+            os.getenv("ADMIN_NAME", "Administrator"),
+            os.getenv("ADMIN_PHONE", "admin"),
+            os.getenv("ADMIN_DOB", "1900-01-01"),
+            "admin",
+        ),
+        (
+            "worker",
+            os.getenv("WORKER_PASSWORD", ""),
+            os.getenv("WORKER_NAME", "Default Worker"),
+            os.getenv("WORKER_PHONE", "worker"),
+            os.getenv("WORKER_DOB", "1900-01-01"),
+            "worker",
+        ),
+    ]
 
-    name = os.getenv("ADMIN_NAME", "Administrator").strip()
-    phone = os.getenv("ADMIN_PHONE", "admin").strip()
-    dob = os.getenv("ADMIN_DOB", "1900-01-01").strip()
-    existing = store.get_user_by_identity(name, phone, dob)
-    if not existing:
+    for username, password, name, phone, dob, role in defaults:
+        if not password:
+            continue
+        existing = store.get_user_by_username(username)
+        if existing:
+            if existing["role"] == role:
+                store.update_user_identity(
+                    existing["id"],
+                    name=name.strip(),
+                    phone=phone.strip(),
+                    dob=dob.strip(),
+                )
+            continue
         store.create_user(
-            username="admin",
-            name=name,
-            phone=phone,
-            dob=dob,
+            username=username,
+            name=name.strip(),
+            phone=phone.strip(),
+            dob=dob.strip(),
             password_hash=password_hash.hash(password),
-            role="admin",
+            role=role,
         )
 
 
