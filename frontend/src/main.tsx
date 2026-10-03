@@ -488,7 +488,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   async function approveQuestions() {
     if (!selected || selected.questions_approved || !questions.length) return;
     try {
-      await api("/admin/questions/approve", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id,questions})});
+      await api("/admin/questions/approve", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id})});
       await loadAssessment(selected.assessment_id);
       await loadList();
       setMessage("Question package approved and activated for the worker.");
