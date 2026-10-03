@@ -260,9 +260,17 @@ class Store:
 
     def approve_level(self, payload):
         assessment_id = payload["assessment_id"]
-        level = int(payload["nsqf_level"])
-        if not 1 <= level <= 8:
+        try:
+            level = float(payload["nsqf_level"])
+        except (TypeError, ValueError):
             return {"approved": False, "reason": "invalid_nsqf_level"}
+
+        allowed_levels = {1, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 8}
+        if level not in allowed_levels:
+            return {"approved": False, "reason": "invalid_nsqf_level"}
+
+        if level.is_integer():
+            level = int(level)
 
         with self._connection() as connection:
             row = connection.execute(
