@@ -92,7 +92,9 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
     event.preventDefault();
     setLoading(true); setError(""); setMessage("");
     try {
-      const payload = { name: name.trim(), phone: phone.trim(), dob, password };
+      const payload = mode === "signup"
+        ? { name: name.trim(), phone: phone.trim(), dob, password }
+        : { name: name.trim(), password };
       if (mode === "signup") {
         const response = await fetch(API + "/auth/signup", {
           method: "POST",
@@ -135,8 +137,10 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
         </div>
         <form onSubmit={submit}>
           <label>Full name<input value={name} onChange={e => setName(e.target.value)} autoComplete="name" required /></label>
-          <label>Phone number<input type="tel" value={phone} onChange={e => setPhone(e.target.value)} autoComplete="tel" required /></label>
-          <label>Date of birth<input type="date" value={dob} onChange={e => setDob(e.target.value)} autoComplete="bday" required /></label>
+          {mode === "signup" && <>
+            <label>Phone number<input type="tel" value={phone} onChange={e => setPhone(e.target.value)} autoComplete="tel" required /></label>
+            <label>Date of birth<input type="date" value={dob} onChange={e => setDob(e.target.value)} autoComplete="bday" required /></label>
+          </>}
           <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} required /></label>
           {error && <p className="error">{error}</p>}
           {message && <p className="notice">{message}</p>}

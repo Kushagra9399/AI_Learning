@@ -56,8 +56,6 @@ def health():
 class LoginRequest(BaseModel):
     name: str
     password: str
-    phone: str
-    dob: str
 
 
 class WorkerSignupRequest(BaseModel):
@@ -69,7 +67,7 @@ class WorkerSignupRequest(BaseModel):
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest):
-    user = authenticate(payload.name, payload.phone, payload.dob, payload.password)
+    user = authenticate(payload.name, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect name, password, phone number or date of birth")
     return {
