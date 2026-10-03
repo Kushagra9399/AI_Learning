@@ -578,7 +578,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
                 {!selected.marks_locked && selected.submitted && <button onClick={lockGrading}>Lock & submit marks</button>}
               </div>
             </div> : <div className="empty"><p className="muted">The worker has not submitted the assessment yet.</p></div>}
-          </section>          </section>}
+          </section>}
         </section> : <section className="panel empty"><h2>Select an assessment</h2><p className="muted">Choose a worker from the list to review their declaration and assessment state.</p></section>}
       </div>
       {message && <p className="notice">{message}</p>}
