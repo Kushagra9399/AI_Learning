@@ -3,6 +3,15 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 
 const API = "http://localhost:8000/api";
+const TOKEN_KEY = "rpl_access_token";
+
+type Role = "admin" | "worker";
+
+type User = {
+  id: number;
+  username: string;
+  role: Role;
+};
 
 type Candidate = {
   name: string;
@@ -21,746 +30,385 @@ type Question = {
   marks: number;
 };
 
-type Job = {
-  status: string;
-  result?: any;
-  error?: string;
+type Assessment = {
+  assessment_id: string;
+  candidate: Candidate;
+  level: number | null;
+  level_suggestion?: any;
+  level_approved: boolean;
+  questions_draft?: Question[] | null;
+  questions?: Question[] | null;
+  questions_approved: boolean;
+  started: boolean;
 };
 
-function useJob(jobId: string) {
-  const [job, setJob] = useState<Job | null>(null);
-
-  useEffect(() => {
-    if (!jobId) return;
-
-    const timer = window.setInterval(async () => {
-      try {
-        const response = await fetch(API + "/jobs/" + jobId);
-        const data = await response.json();
-        setJob(data);
-
-        if (data.status === "completed" || data.status === "failed") {
-          window.clearInterval(timer);
-        }
-      } catch (error) {
-        console.error("Job polling failed:", error);
-      }
-    }, 700);
-
-    return () => window.clearInterval(timer);
-  }, [jobId]);
-
-  return job;
+function token() {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
-function WorkerDashboard() {
-  const [candidate, setCandidate] = useState<Candidate>({
-    name: "",
-    age: 25,
-    years_experience: 3,
-    occupation: "Construction Electrician",
-    work_context: "",
-    prior_training: "",
-  });
-
-  const [assessmentId, setAssessmentId] = useState("");
-  const [jobId, setJobId] = useState("");
-  const [level, setLevel] = useState<number | null>(null);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [files, setFiles] = useState<Record<string, File>>({});
-  const [step, setStep] = useState<"info" | "waiting" | "ready" | "test" | "done">("info");
-  const [message, setMessage] = useState("");
-
-  const job = useJob(jobId);
-
-  useEffect(() => {
-    if (!job) return;
-
-    if (job.status === "completed") {
-      if (job.result?.suggested_level) {
-        setLevel(job.result.suggested_level);
-        setStep("waiting");
-        setMessage("AI NSQF recommendation is ready for administrator review.");
-      }
-
-      if (job.result?.questions) {
-        setQuestions(job.result.questions);
-        setStep("ready");
-      }
-    }
-
-    if (job.status === "failed") {
-      setMessage(job.error || "Backend processing failed.");
-    }
-  }, [job]);
-
-  async function submitInformation() {
-    setMessage("");
-
-    const response = await fetch(API + "/admin/level-suggestion", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(candidate),
-    });
-
-    const data = await response.json();
-
-    setAssessmentId(data.assessment_id);
-    setJobId(data.job_id);
-    setStep("waiting");
+async function api(path: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers);
+  const accessToken = token();
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
   }
 
-  async function checkAssessment() {
-    if (!assessmentId) return;
-
-    const response = await fetch(API + "/user/" + assessmentId + "/assessment");
-    const data = await response.json();
-
-    if (!data.exists) {
-      setMessage("Assessment not found.");
-      return;
-    }
-
-    if (data.level) {
-      setLevel(data.level);
-    }
-
-    if (data.questions_approved) {
-      setQuestions(data.questions || []);
-      setStep("ready");
-      setMessage("Assessment approved. You can start your one-time attempt.");
-    } else if (data.level_approved) {
-      setMessage("NSQF level approved. Waiting for administrator question approval.");
-    } else {
-      setMessage("Waiting for administrator level approval.");
-    }
+  const response = await fetch(API + path, { ...options, headers });
+  if (response.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    window.location.reload();
   }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || data.reason || "Request failed");
+  return data;
+}
 
-  async function startAssessment() {
-    const response = await fetch(API + "/user/" + assessmentId + "/start", {
-      method: "POST",
-    });
+function Login({ onLogin }: { onLogin: (user: User) => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-    const data = await response.json();
-
-    if (!data.accepted) {
-      setMessage(data.reason || "Assessment cannot be started.");
-      return;
-    }
-
-    setStep("test");
-    setMessage("Attempt started. This assessment cannot be restarted.");
-  }
-
-  async function submitAssessment() {
-    setMessage("Uploading evidence and submitting assessment...");
-
-    for (const question of questions) {
-      const file = files[question.id];
-
-      if (!file) continue;
-
-      const form = new FormData();
-      form.append("assessment_id", assessmentId);
-      form.append("task_id", question.id);
-      form.append("media", file);
-
-      await fetch(API + "/evidence", {
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const body = new URLSearchParams();
+      body.set("username", username);
+      body.set("password", password);
+      const response = await fetch(API + "/auth/login", {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Invalid username or password");
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      onLogin(data.user);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Login failed");
+    } finally {
+      setLoading(false);
     }
-
-    const payload = {
-      assessment_id: assessmentId,
-      qp_code: "CON/Q0603",
-      nsqf_level: level,
-      candidate,
-      answers: questions.map((question) => ({
-        ...question,
-        response: answers[question.id] || "",
-        selected_option:
-          question.type === "mcq"
-            ? Number(answers[question.id])
-            : -1,
-      })),
-      practical_scores: [],
-    };
-
-    const response = await fetch(API + "/submissions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (!data.accepted) {
-      setMessage("Submission failed: " + data.reason);
-      return;
-    }
-
-    setStep("done");
-    setMessage("Assessment submitted successfully.");
-  }
-
-  function renderQuestion(question: Question) {
-    if (question.type === "mcq") {
-      return (
-        <div className="question-options">
-          {(question.options || []).map((option, index) => (
-            <label key={index}>
-              <input
-                type="radio"
-                name={question.id}
-                checked={answers[question.id] === String(index)}
-                onChange={() =>
-                  setAnswers({
-                    ...answers,
-                    [question.id]: String(index),
-                  })
-                }
-              />
-              {option}
-            </label>
-          ))}
-        </div>
-      );
-    }
-
-    if (question.type === "text") {
-      return (
-        <textarea
-          placeholder="Write your answer"
-          value={answers[question.id] || ""}
-          onChange={(event) =>
-            setAnswers({
-              ...answers,
-              [question.id]: event.target.value,
-            })
-          }
-        />
-      );
-    }
-
-    return (
-      <>
-        <p>
-          Upload the evidence requested by the administrator for this
-          practical question.
-        </p>
-        <input
-          type="file"
-          accept={question.type === "image" ? "image/*" : "video/*"}
-          capture="environment"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) {
-              setFiles({
-                ...files,
-                [question.id]: file,
-              });
-            }
-          }}
-        />
-      </>
-    );
   }
 
   return (
-    <Shell title="Worker Dashboard">
-      {step === "info" && (
-        <section>
-          <h1>Recognition of Prior Learning</h1>
-          <p>
-            Submit your prior work experience. The administrator will review
-            the AI-assisted NSQF recommendation.
-          </p>
-
-          <input
-            placeholder="Name"
-            value={candidate.name}
-            onChange={(event) =>
-              setCandidate({ ...candidate, name: event.target.value })
-            }
-          />
-
-          <input
-            type="number"
-            placeholder="Age"
-            value={candidate.age}
-            onChange={(event) =>
-              setCandidate({
-                ...candidate,
-                age: Number(event.target.value),
-              })
-            }
-          />
-
-          <input
-            type="number"
-            placeholder="Years of experience"
-            value={candidate.years_experience}
-            onChange={(event) =>
-              setCandidate({
-                ...candidate,
-                years_experience: Number(event.target.value),
-              })
-            }
-          />
-
-          <input
-            placeholder="Occupation"
-            value={candidate.occupation}
-            onChange={(event) =>
-              setCandidate({
-                ...candidate,
-                occupation: event.target.value,
-              })
-            }
-          />
-
-          <textarea
-            placeholder="Work performed / skills"
-            value={candidate.work_context}
-            onChange={(event) =>
-              setCandidate({
-                ...candidate,
-                work_context: event.target.value,
-              })
-            }
-          />
-
-          <textarea
-            placeholder="Prior training / certificates"
-            value={candidate.prior_training}
-            onChange={(event) =>
-              setCandidate({
-                ...candidate,
-                prior_training: event.target.value,
-              })
-            }
-          />
-
-          <button onClick={submitInformation}>
-            Submit information
-          </button>
-        </section>
-      )}
-
-      {step === "waiting" && (
-        <section>
-          <h2>Awaiting Administrator Review</h2>
-          <p>
-            Assessment ID: <code>{assessmentId}</code>
-          </p>
-          <p>
-            AI suggested NSQF Level:{" "}
-            <strong>{level ?? "processing"}</strong>
-          </p>
-          <button onClick={checkAssessment}>
-            Check assessment status
-          </button>
-        </section>
-      )}
-
-      {step === "ready" && (
-        <section>
-          <h2>Assessment Ready</h2>
-          <p>
-            NSQF Level: <strong>{level}</strong>
-          </p>
-          <p>
-            Starting the assessment locks your attempt. You cannot restart
-            after starting.
-          </p>
-          <button onClick={startAssessment}>
-            Start One-Time Assessment
-          </button>
-        </section>
-      )}
-
-      {step === "test" && (
-        <section>
-          <h2>Assessment · NSQF Level {level}</h2>
-
-          {questions.map((question) => (
-            <article key={question.id} className="question-card">
-              <small>
-                {question.type.toUpperCase()} · {question.marks} marks
-              </small>
-
-              <h3>{question.question}</h3>
-
-              {renderQuestion(question)}
-            </article>
-          ))}
-
-          <button onClick={submitAssessment}>
-            Submit Assessment
-          </button>
-        </section>
-      )}
-
-      {step === "done" && (
-        <section>
-          <h2>Assessment Submitted</h2>
-          <p>{message}</p>
-          <p>
-            The administrator will review AI evaluation and practical
-            image/video evidence.
-          </p>
-        </section>
-      )}
-
-      {message && step !== "done" && (
-        <p className="notice">{message}</p>
-      )}
-    </Shell>
-  );
-}
-
-function AdminDashboard() {
-  const [assessmentId, setAssessmentId] = useState("");
-  const [candidate, setCandidate] = useState<Candidate | null>(null);
-  const [suggestion, setSuggestion] = useState<any>(null);
-  const [level, setLevel] = useState(4);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [jobId, setJobId] = useState("");
-  const [message, setMessage] = useState("");
-
-  const job = useJob(jobId);
-
-  useEffect(() => {
-    if (!job) return;
-
-    if (job.status === "completed") {
-      if (job.result?.suggested_level) {
-        setSuggestion(job.result);
-        setLevel(job.result.suggested_level);
-        setMessage("AI NSQF recommendation is ready for approval.");
-      }
-
-      if (job.result?.questions) {
-        setQuestions(job.result.questions);
-        setMessage("AI question draft is ready for administrator review.");
-      }
-    }
-
-    if (job.status === "failed") {
-      setMessage(job.error || "AI processing failed.");
-    }
-  }, [job]);
-
-  async function loadCandidate() {
-    const response = await fetch(
-      API + "/admin/candidate/" + assessmentId
-    );
-    const data = await response.json();
-
-    if (!data.assessment_id || !data.candidate) {
-      setMessage("Candidate not found.");
-      return;
-    }
-
-    setCandidate(JSON.parse(data.candidate));
-    setLevel(data.level || 4);
-    setSuggestion(
-      data.level_suggestion
-        ? JSON.parse(data.level_suggestion)
-        : null
-    );
-    setQuestions(
-      data.questions
-        ? JSON.parse(data.questions)
-        : []
-    );
-  }
-
-  async function runLevelAnalysis() {
-    if (!candidate) return;
-
-    const response = await fetch(API + "/admin/level-suggestion", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(candidate),
-    });
-
-    const data = await response.json();
-
-    setAssessmentId(data.assessment_id);
-    setJobId(data.job_id);
-    setMessage("Groq NSQF level analysis started.");
-  }
-
-  async function approveLevel() {
-    await fetch(API + "/admin/level-approval", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        assessment_id: assessmentId,
-        nsqf_level: level,
-        candidate,
-        suggestion,
-      }),
-    });
-
-    setMessage(
-      "NSQF level approved. Question generation is now available."
-    );
-  }
-
-  async function generateQuestions() {
-    const response = await fetch(
-      API + "/admin/questions/generate",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          assessment_id: assessmentId,
-          nsqf_level: level,
-          candidate,
-          count: 10,
-        }),
-      }
-    );
-
-    const data = await response.json();
-    setJobId(data.job_id);
-    setMessage("Groq question generation started.");
-  }
-
-  async function approveQuestions() {
-    await fetch(API + "/admin/questions/approve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        assessment_id: assessmentId,
-        questions,
-      }),
-    });
-
-    setMessage(
-      "Questions and marking scheme approved. Test is now active for the worker."
-    );
-  }
-
-  function updateQuestion(
-    index: number,
-    changes: Partial<Question>
-  ) {
-    const updated = [...questions];
-    updated[index] = {
-      ...updated[index],
-      ...changes,
-    };
-    setQuestions(updated);
-  }
-
-  return (
-    <Shell title="Admin Dashboard">
-      <section>
-        <h1>RPL Administration</h1>
-
-        <div className="toolbar">
-          <input
-            placeholder="Assessment ID"
-            value={assessmentId}
-            onChange={(event) =>
-              setAssessmentId(event.target.value)
-            }
-          />
-          <button onClick={loadCandidate}>
-            Load Candidate
-          </button>
-        </div>
-
-        {candidate && (
-          <>
-            <h2>Worker Declaration</h2>
-            <pre>{JSON.stringify(candidate, null, 2)}</pre>
-
-            <section className="result">
-              <h2>AI NSQF Recommendation</h2>
-
-              {suggestion ? (
-                <>
-                  <h1>Level {suggestion.suggested_level}</h1>
-                  <p>
-                    Confidence: {suggestion.confidence}
-                  </p>
-                  <p>{suggestion.reason}</p>
-                </>
-              ) : (
-                <p>No AI recommendation has been generated yet.</p>
-              )}
-
-              <label>
-                Administrator Approved Level
-                <input
-                  type="number"
-                  min="1"
-                  max="8"
-                  value={level}
-                  onChange={(event) =>
-                    setLevel(Number(event.target.value))
-                  }
-                />
-              </label>
-
-              <button
-                onClick={approveLevel}
-                disabled={!suggestion}
-              >
-                Approve Level
-              </button>
-            </section>
-
-            <button onClick={runLevelAnalysis}>
-              Run Groq Level Analysis
-            </button>
-
-            <hr />
-
-            <h2>AI Question Generation</h2>
-
-            <p>
-              NSQF Level {level} module context will be injected into
-              the backend Groq prompt.
-            </p>
-
-            <button onClick={generateQuestions}>
-              Generate Questions
-            </button>
-
-            {questions.length > 0 && (
-              <section>
-                <h2>Review Questions & Marking Scheme</h2>
-
-                {questions.map((question, index) => (
-                  <article
-                    key={question.id}
-                    className="question-card"
-                  >
-                    <input
-                      value={question.question}
-                      onChange={(event) =>
-                        updateQuestion(index, {
-                          question: event.target.value,
-                        })
-                      }
-                    />
-
-                    <select
-                      value={question.type}
-                      onChange={(event) =>
-                        updateQuestion(index, {
-                          type: event.target.value as Question["type"],
-                        })
-                      }
-                    >
-                      <option value="mcq">MCQ</option>
-                      <option value="text">Text</option>
-                      <option value="image">Image</option>
-                      <option value="video">Video</option>
-                    </select>
-
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={question.marks}
-                      onChange={(event) =>
-                        updateQuestion(index, {
-                          marks: Number(event.target.value),
-                        })
-                      }
-                    />
-
-                    <button
-                      onClick={() =>
-                        setQuestions(
-                          questions.filter(
-                            (_, questionIndex) =>
-                              questionIndex !== index
-                          )
-                        )
-                      }
-                    >
-                      Delete
-                    </button>
-                  </article>
-                ))}
-
-                <button
-                  onClick={() =>
-                    setQuestions([
-                      ...questions,
-                      {
-                        id: "q-" + Date.now(),
-                        type: "text",
-                        question: "New question",
-                        options: [],
-                        marks: 1,
-                      },
-                    ])
-                  }
-                >
-                  Add Question
-                </button>
-
-                <button onClick={approveQuestions}>
-                  Approve & Activate Test
-                </button>
-              </section>
-            )}
-          </>
-        )}
-
-        {message && <p className="notice">{message}</p>}
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="brand-mark">RPL</div>
+        <h1>Recognition of Prior Learning</h1>
+        <p className="muted">AI-assisted skill assessment platform</p>
+        <form onSubmit={submit}>
+          <label>Username<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required /></label>
+          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+          {error && <p className="error">{error}</p>}
+          <button disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button>
+        </form>
       </section>
-    </Shell>
+    </main>
   );
 }
 
-function Shell({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Shell({ user, children, onLogout }: { user: User; children: React.ReactNode; onLogout: () => void }) {
   return (
-    <main>
-      <header>
-        <div>
-          <strong>{title}</strong>
-          <span>AI-Assisted Recognition of Prior Learning</span>
+    <main className="app-shell">
+      <header className="topbar">
+        <div><strong>RPL Assessment</strong><span>AI-assisted, human-authorized workflow</span></div>
+        <div className="account">
+          <span>{user.username} · {user.role}</span>
+          <button className="secondary" onClick={onLogout}>Sign out</button>
         </div>
-
-        <nav>
-          <a href="/">Worker</a>
-          {" · "}
-          <a href="/?admin=1">Admin</a>
-        </nav>
       </header>
-
       {children}
     </main>
   );
 }
 
-function App() {
-  const isAdmin = new URLSearchParams(window.location.search).has(
-    "admin"
-  );
+function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [candidate, setCandidate] = useState<Candidate>({
+    name: "", age: 25, years_experience: 3,
+    occupation: "Construction Electrician",
+    work_context: "", prior_training: "",
+  });
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [files, setFiles] = useState<Record<string, File>>({});
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  return isAdmin ? <AdminDashboard /> : <WorkerDashboard />;
+  async function load() {
+    try {
+      const data = await api("/worker/assessment");
+      if (data.exists) {
+        setAssessment(data);
+        if (data.candidate) setCandidate(data.candidate);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load assessment");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  async function createAssessment() {
+    setMessage("Submitting worker declaration...");
+    try {
+      const data = await api("/worker/assessment", { method: "POST", body: JSON.stringify(candidate) });
+      await load();
+      setMessage(data.existing ? "Your existing assessment was restored." : "Declaration submitted. Awaiting administrator review.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to submit declaration");
+    }
+  }
+
+  async function start() {
+    if (!assessment) return;
+    try {
+      await api(`/worker/assessment/${assessment.assessment_id}/start`, { method: "POST" });
+      await load();
+      setMessage("Assessment started. Your attempt is locked to one submission.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to start assessment");
+    }
+  }
+
+  async function submit() {
+    if (!assessment) return;
+    setMessage("Uploading evidence and submitting...");
+    try {
+      for (const question of assessment.questions || []) {
+        const file = files[question.id];
+        if (!file) continue;
+        const form = new FormData();
+        form.append("assessment_id", assessment.assessment_id);
+        form.append("task_id", question.id);
+        form.append("media", file);
+        await api("/evidence", { method: "POST", body: form });
+      }
+
+      const payload = {
+        assessment_id: assessment.assessment_id,
+        qp_code: "CON/Q0603",
+        nsqf_level: assessment.level,
+        candidate,
+        answers: (assessment.questions || []).map(question => ({
+          ...question,
+          response: answers[question.id] || "",
+          selected_option: question.type === "mcq" ? Number(answers[question.id]) : -1,
+        })),
+        practical_scores: [],
+      };
+      await api("/submissions", { method: "POST", body: JSON.stringify(payload) });
+      await load();
+      setMessage("Assessment submitted successfully.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Submission failed");
+    }
+  }
+
+  if (loading) return <Shell user={user} onLogout={onLogout}><section className="panel"><p>Loading your assessment...</p></section></Shell>;
+
+  const questions = assessment?.questions || [];
+  const hasSubmitted = assessment?.submitted;
+
+  return (
+    <Shell user={user} onLogout={onLogout}>
+      <section className="page-heading"><div><p className="eyebrow">WORKER PORTAL</p><h1>Your assessment</h1><p className="muted">Your progress is saved on the server and will remain available after refresh.</p></div></section>
+
+      {!assessment && (
+        <section className="panel">
+          <h2>Worker declaration</h2>
+          <p className="muted">Provide your prior experience and training. An administrator will review the AI-assisted NSQF recommendation.</p>
+          <div className="form-grid">
+            <label>Name<input value={candidate.name} onChange={e => setCandidate({...candidate, name:e.target.value})} /></label>
+            <label>Age<input type="number" value={candidate.age} onChange={e => setCandidate({...candidate, age:Number(e.target.value)})} /></label>
+            <label>Years of experience<input type="number" value={candidate.years_experience} onChange={e => setCandidate({...candidate, years_experience:Number(e.target.value)})} /></label>
+            <label>Occupation<input value={candidate.occupation} onChange={e => setCandidate({...candidate, occupation:e.target.value})} /></label>
+          </div>
+          <label>Work performed / skills<textarea value={candidate.work_context} onChange={e => setCandidate({...candidate, work_context:e.target.value})} /></label>
+          <label>Prior training / certificates<textarea value={candidate.prior_training} onChange={e => setCandidate({...candidate, prior_training:e.target.value})} /></label>
+          <button onClick={createAssessment}>Submit declaration</button>
+        </section>
+      )}
+
+      {assessment && (
+        <>
+          <section className="status-grid">
+            <div className="status-card"><span>Assessment</span><strong>{assessment.assessment_id}</strong></div>
+            <div className="status-card"><span>NSQF level</span><strong>{assessment.level ?? assessment.level_suggestion?.suggested_level ?? "Pending"}</strong></div>
+            <div className="status-card"><span>Level approval</span><strong>{assessment.level_approved ? "Approved" : "Pending"}</strong></div>
+            <div className="status-card"><span>Questions</span><strong>{assessment.questions_approved ? "Active" : "Pending approval"}</strong></div>
+          </section>
+
+          {!assessment.level_approved && <section className="panel"><h2>Awaiting administrator review</h2><p>{assessment.level_suggestion ? `AI recommendation: Level ${assessment.level_suggestion.suggested_level}. The administrator must approve it before the assessment can proceed.` : "AI analysis is being processed. This page checks the persisted assessment automatically."}</p></section>}
+
+          {assessment.level_approved && !assessment.questions_approved && <section className="panel"><h2>Questions are being prepared</h2><p>The approved NSQF level is locked. The administrator is reviewing the generated questions.</p></section>}
+
+          {assessment.questions_approved && !assessment.started && !hasSubmitted && <section className="panel"><h2>Assessment ready</h2><p>Your administrator has approved the assessment package for NSQF Level {assessment.level}.</p><button onClick={start}>Start assessment</button></section>}
+
+          {assessment.started && !hasSubmitted && <section className="panel"><h2>Assessment · Level {assessment.level}</h2>{questions.map(question => (
+            <article className="question-card" key={question.id}>
+              <div className="question-meta">{question.type.toUpperCase()} · {question.marks} marks</div>
+              <h3>{question.question}</h3>
+              {question.type === "mcq" ? (question.options || []).map((option, i) => <label className="option" key={i}><input type="radio" name={question.id} checked={answers[question.id] === String(i)} onChange={() => setAnswers({...answers,[question.id]:String(i)})} />{option}</label>) : question.type === "text" ? <textarea value={answers[question.id] || ""} onChange={e => setAnswers({...answers,[question.id]:e.target.value})} placeholder="Write your answer" /> : <input type="file" accept={question.type === "image" ? "image/*" : "video/*"} onChange={e => { const file=e.target.files?.[0]; if(file) setFiles({...files,[question.id]:file}); }} />}
+            </article>
+          ))}<button onClick={submit}>Submit assessment</button></section>}
+
+          {hasSubmitted && <section className="panel success"><h2>Assessment submitted</h2><p>Your one-time attempt has been recorded. Further review is handled by the administrator.</p></section>}
+        </>
+      )}
+      {message && <p className="notice">{message}</p>}
+    </Shell>
+  );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [assessments, setAssessments] = useState<any[]>([]);
+  const [selected, setSelected] = useState<Assessment | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [message, setMessage] = useState("");
+  const [jobId, setJobId] = useState("");
+
+  async function loadList() {
+    try { setAssessments(await api("/admin/assessments")); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load assessments"); }
+  }
+
+  async function loadAssessment(id: string) {
+    try {
+      const data = await api(`/admin/candidate/${id}`);
+      setSelected(data);
+      setQuestions(data.questions_draft || data.questions || []);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load assessment"); }
+  }
+
+  useEffect(() => { loadList(); }, []);
+
+  useEffect(() => {
+    if (!jobId) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const job = await api(`/jobs/${jobId}`);
+        if (job.status === "completed") {
+          clearInterval(timer);
+          await loadAssessment(job.result.assessment_id);
+          setMessage("AI question draft generated and persisted. Review it before approval.");
+        } else if (job.status === "failed") {
+          clearInterval(timer);
+          setMessage(job.error || "AI processing failed");
+        }
+      } catch (error) {
+        clearInterval(timer);
+        setMessage(error instanceof Error ? error.message : "Job polling failed");
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [jobId]);
+
+  async function regenerateLevel() {
+    if (!selected || selected.level_approved) return;
+    try {
+      const data = await api(`/admin/assessments/${selected.assessment_id}/level-suggestion`, {method:"POST"});
+      setJobId(data.job_id);
+      setMessage("AI level recommendation started.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to start analysis"); }
+  }
+
+  async function approveLevel() {
+    if (!selected || selected.level_approved) return;
+    const level = selected.level_suggestion?.suggested_level;
+    if (!level) return;
+    try {
+      await api("/admin/level-approval", {method:"POST",body:JSON.stringify({
+        assessment_id:selected.assessment_id, nsqf_level:level, suggestion:selected.level_suggestion
+      })});
+      await loadAssessment(selected.assessment_id);
+      await loadList();
+      setMessage("NSQF level approved and locked. AI recommendations can no longer be generated for this assessment.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to approve level"); }
+  }
+
+  async function generateQuestions() {
+    if (!selected || !selected.level_approved || selected.questions_approved) return;
+    try {
+      const data = await api("/admin/questions/generate", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id,count:10})});
+      setJobId(data.job_id);
+      setMessage("Question generation started.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to generate questions"); }
+  }
+
+  async function approveQuestions() {
+    if (!selected || selected.questions_approved || !questions.length) return;
+    try {
+      await api("/admin/questions/approve", {method:"POST",body:JSON.stringify({assessment_id:selected.assessment_id,questions})});
+      await loadAssessment(selected.assessment_id);
+      await loadList();
+      setMessage("Question package approved and activated for the worker.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to approve questions"); }
+  }
+
+  function updateQuestion(index:number, changes:Partial<Question>) {
+    setQuestions(current => current.map((q,i) => i===index ? {...q,...changes} : q));
+  }
+
+  return (
+    <Shell user={user} onLogout={onLogout}>
+      <section className="page-heading"><div><p className="eyebrow">ADMIN PORTAL</p><h1>Assessment management</h1><p className="muted">Every state transition is persisted and authorization is enforced by the API.</p></div></section>
+      <div className="admin-layout">
+        <section className="panel">
+          <div className="panel-header"><h2>Worker assessments</h2><button className="secondary" onClick={loadList}>Refresh</button></div>
+          {assessments.map(item => <button className={`assessment-row ${selected?.assessment_id===item.assessment_id?"selected":""}`} key={item.assessment_id} onClick={() => loadAssessment(item.assessment_id)}><span><strong>{item.candidate?.name || "Unnamed worker"}</strong><small>{item.assessment_id}</small></span><span>{item.level ? `Level ${item.level}` : "Level pending"}</span></button>)}
+          {!assessments.length && <p className="muted">No worker assessments yet.</p>}
+        </section>
+
+        {selected ? <section className="panel">
+          <div className="panel-header"><div><h2>{selected.candidate.name || "Worker assessment"}</h2><p className="muted">{selected.assessment_id}</p></div><span className={`badge ${selected.level_approved?"approved":"pending"}`}>{selected.level_approved?"LEVEL LOCKED":"REVIEW REQUIRED"}</span></div>
+          <div className="candidate-box"><strong>{selected.candidate.occupation}</strong><p>{selected.candidate.work_context}</p><small>{selected.candidate.years_experience} years experience · {selected.candidate.prior_training || "No prior training listed"}</small></div>
+          <section className="result">
+            <h3>NSQF recommendation</h3>
+            {selected.level_suggestion ? <><div className="recommendation">Level {selected.level_suggestion.suggested_level}</div><p>{selected.level_suggestion.reason}</p><small>Confidence: {selected.level_suggestion.confidence}</small></> : <p className="muted">No recommendation yet.</p>}
+            <div className="actions">
+              {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
+              <button onClick={approveLevel} disabled={selected.level_approved || !selected.level_suggestion}>Approve & lock level</button>
+            </div>
+          </section>
+          <section className="result">
+            <h3>Question package</h3>
+            <p className="muted">{selected.level_approved ? `Questions will be generated for locked NSQF Level ${selected.level}.` : "Approve the level before generating questions."}</p>
+            <button onClick={generateQuestions} disabled={!selected.level_approved || selected.questions_approved}>Generate questions</button>
+            {(questions.length > 0) && <div className="question-editor">{questions.map((q,i) => <article className="question-card" key={q.id}><input value={q.question} onChange={e=>updateQuestion(i,{question:e.target.value})}/><div className="inline-fields"><select value={q.type} onChange={e=>updateQuestion(i,{type:e.target.value as Question["type"]})}><option value="mcq">MCQ</option><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option></select><input type="number" min="1" max="10" value={q.marks} onChange={e=>updateQuestion(i,{marks:Number(e.target.value)})}/></div><button className="danger" onClick={()=>setQuestions(current=>current.filter((_,x)=>x!==i))}>Delete</button></article>)}</div>}
+            {!selected.questions_approved && <button onClick={approveQuestions} disabled={!questions.length}>Approve & activate assessment</button>}
+            {selected.questions_approved && <p className="success-text">Approved questions are active for the worker. They cannot be replaced by a new AI recommendation.</p>}
+          </section>
+        </section> : <section className="panel empty"><h2>Select an assessment</h2><p className="muted">Choose a worker from the list to review their declaration and assessment state.</p></section>}
+      </div>
+      {message && <p className="notice">{message}</p>}
+    </Shell>
+  );
+}
+
+function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!token()) { setLoading(false); return; }
+    api("/auth/me").then(setUser).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <main className="auth-page"><p>Loading...</p></main>;
+  if (!user) return <Login onLogin={setUser} />;
+
+  const logout = () => { localStorage.removeItem(TOKEN_KEY); setUser(null); };
+  return user.role === "admin" ? <AdminDashboard user={user} onLogout={logout} /> : <WorkerDashboard user={user} onLogout={logout} />;
+}
+
+createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
