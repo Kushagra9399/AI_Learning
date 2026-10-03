@@ -144,6 +144,18 @@ function Shell({ user, children, onLogout }: { user: User; children: React.React
   );
 }
 
+function WorkerDeclaration({candidate,setCandidate,onSubmit}:{candidate:Candidate;setCandidate:React.Dispatch<React.SetStateAction<Candidate>>;onSubmit:()=>void}) {
+  return <><div className="form-grid">
+    <label>Name<input value={candidate.name} onChange={e=>setCandidate({...candidate,name:e.target.value})}/></label>
+    <label>Age<input type="number" value={candidate.age} onChange={e=>setCandidate({...candidate,age:Number(e.target.value)})}/></label>
+    <label>Years of experience<input type="number" value={candidate.years_experience} onChange={e=>setCandidate({...candidate,years_experience:Number(e.target.value)})}/></label>
+    <label>Occupation<input value={candidate.occupation} onChange={e=>setCandidate({...candidate,occupation:e.target.value})}/></label>
+  </div>
+  <label>Work performed / skills<textarea value={candidate.work_context} onChange={e=>setCandidate({...candidate,work_context:e.target.value})}/></label>
+  <label>Prior training / certificates<textarea value={candidate.prior_training} onChange={e=>setCandidate({...candidate,prior_training:e.target.value})}/></label>
+  <button onClick={onSubmit}>Submit declaration</button></>;
+}
+
 function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [route, setRoute] = useState(window.location.pathname);
   useEffect(() => {
