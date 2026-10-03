@@ -93,15 +93,15 @@ def signup(payload: WorkerSignupRequest):
     if not name or not phone or not dob or not payload.password:
         raise HTTPException(status_code=400, detail="Name, password, phone number and date of birth are required")
 
+    if store.get_user_by_username(name):
+        raise HTTPException(status_code=409, detail="A user with this name already exists")
+
     if store.get_user_by_phone(phone):
         raise HTTPException(status_code=409, detail="A user with this phone number already exists")
 
-    if store.get_user_by_identity(name, phone, dob):
-        raise HTTPException(status_code=409, detail="Worker account already exists")
-
     from .auth import password_hash
     user = store.create_user(
-        username=phone,
+        username=name,
         name=name,
         phone=phone,
         dob=dob,
