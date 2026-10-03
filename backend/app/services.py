@@ -133,7 +133,17 @@ def level_context(level: int):
 
 
 def _compact_level_context(level: int) -> str:
-    return json.dumps(level_context(level), separators=(",", ":"))
+    level = int(level)
+    if level <= 5:
+        return json.dumps(level_context(level), separators=(",", ":"))
+    return json.dumps(
+        {
+            "level": level,
+            "descriptor_status": "stored_locally_but_not_sent_to_llm",
+            "message": "Detailed descriptors for Levels 6–8 will be supplied through the future NQR API.",
+        },
+        separators=(",", ":"),
+    )
 
 
 def _prompt_nsqf_context() -> str:
