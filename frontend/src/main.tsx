@@ -40,6 +40,7 @@ type Assessment = {
   questions?: Question[] | null;
   questions_approved: boolean;
   started: boolean;
+  submitted?: boolean;
 };
 
 function token() {
