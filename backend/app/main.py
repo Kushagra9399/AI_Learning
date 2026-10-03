@@ -137,7 +137,23 @@ def admin_assessments(_: AdminUser):
 
 @app.get("/api/admin/candidate/{assessment_id}")
 def get_candidate(assessment_id: str, _: AdminUser):
-    return store.admin_candidate(assessment_id)
+    candidate = store.admin_candidate(assessment_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    return candidate
+
+@app.get("/api/admin/submissions/{assessment_id}")
+def get_admin_submission(assessment_id: str, _: AdminUser):
+    candidate = store.admin_candidate(assessment_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    return {
+        "assessment_id": assessment_id,
+        "submitted": candidate["submitted"],
+        "submitted_at": candidate["submitted_at"],
+        "submission": candidate["submission"],
+        "evidence": candidate["evidence"],
+    }
 
 
 @app.post("/api/admin/assessments/{assessment_id}/level-suggestion")
