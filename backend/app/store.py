@@ -432,6 +432,7 @@ class Store:
             "assessment_id": row["assessment_id"],
             "candidate": self._candidate(row),
             "level": row["level"],
+            "level_suggestion": self._json_or_none(row["level_suggestion"]),
             "level_approved": bool(row["level_approved"]),
             "questions": questions if row["questions_approved"] else None,
             "questions_approved": bool(row["questions_approved"]),
