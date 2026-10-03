@@ -394,6 +394,32 @@ class Store:
             )
         return True
 
+    def save_question_draft_from_admin(self, assessment_id, questions):
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT level_approved, questions_approved
+                FROM assessments WHERE assessment_id=?
+                """,
+                (assessment_id,),
+            ).fetchone()
+            if not row:
+                return {"saved": False, "reason": "assessment_not_found"}
+            if not row["level_approved"]:
+                return {"saved": False, "reason": "level_not_approved"}
+            if row["questions_approved"]:
+                return {"saved": False, "reason": "questions_already_approved"}
+
+            connection.execute(
+                """
+                UPDATE assessments
+                SET questions_draft=?
+                WHERE assessment_id=? AND questions_approved=0
+                """,
+                (json.dumps(questions), assessment_id),
+            )
+        return {"assessment_id": assessment_id, "saved": True}
+
     def approve_questions(self, payload):
         with self._connection() as connection:
             row = connection.execute(
