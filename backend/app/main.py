@@ -277,6 +277,17 @@ def create_question_job(payload: dict, _: AdminUser):
     return {"job_id": job["id"], "status": "queued"}
 
 
+@app.post("/api/admin/questions/draft")
+def save_question_draft(payload: dict, _: AdminUser):
+    questions = payload.get("questions")
+    if not isinstance(questions, list) or not questions:
+        raise HTTPException(status_code=400, detail="Question draft is required")
+    result = store.save_question_draft_from_admin(payload["assessment_id"], questions)
+    if not result.get("saved"):
+        raise HTTPException(status_code=409, detail=result.get("reason", "Unable to save question draft"))
+    return result
+
+
 @app.post("/api/admin/questions/approve")
 def approve_questions(payload: dict, _: AdminUser):
     return store.approve_questions(payload)
