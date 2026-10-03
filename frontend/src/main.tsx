@@ -436,7 +436,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
 
   return (
     <Shell user={user} onLogout={onLogout}>
-      <section className="page-heading"><div><p className="eyebrow">ASSESSMENT REVIEW</p><h1>{selected?.candidate?.name || "Assessment"}</h1><p className="muted">{selected?.assessment_id || "Select an assessment from the Assessments page."}</p></div></section><p className="muted">Every state transition is persisted and authorization is enforced by the API.</p></div></section>
+      <section className="page-heading"><div><p className="eyebrow">ASSESSMENT REVIEW</p><h1>{selected?.candidate?.name || "Assessment"}</h1><p className="muted">{selected?.assessment_id || "Select an assessment from the Assessments page."}</p></div><p className="muted">Every state transition is persisted and authorization is enforced by the API.</p></section>
       <div className="admin-layout">
         <section className="panel">
           <div className="panel-header"><h2>Worker assessments</h2><button className="secondary" onClick={loadList}>Refresh</button></div>
@@ -510,10 +510,16 @@ function App() {
     api("/auth/me").then(setUser).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <main className="auth-page"><p>Loading...</p></main>;
-  if (!user) return <Login onLogin={setUser} />;
+  useEffect(() => {
+    if (user && (window.location.pathname === "/" || window.location.pathname === "/login")) {
+      navigate(user.role === "admin" ? "/admin/dashboard" : "/worker/dashboard");
+    }
+  }, [user]);
 
-  const logout = () => { localStorage.removeItem(TOKEN_KEY); setUser(null); };
+  if (loading) return <main className="auth-page"><p>Loading...</p></main>;
+  if (!user) return <Login onLogin={(nextUser) => { setUser(nextUser); navigate(nextUser.role === "admin" ? "/admin/dashboard" : "/worker/dashboard"); }} />;
+
+  const logout = () => { localStorage.removeItem(TOKEN_KEY); setUser(null); navigate("/login"); };
   return user.role === "admin" ? <AdminDashboard user={user} onLogout={logout} /> : <WorkerDashboard user={user} onLogout={logout} />;
 }
 
