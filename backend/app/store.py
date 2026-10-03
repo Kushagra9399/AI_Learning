@@ -94,6 +94,9 @@ class Store:
             migrations = {
                 "worker_user_id": "ALTER TABLE assessments ADD COLUMN worker_user_id INTEGER",
                 "questions_draft": "ALTER TABLE assessments ADD COLUMN questions_draft TEXT",
+                "grading": "ALTER TABLE assessments ADD COLUMN grading TEXT",
+                "marks_locked": "ALTER TABLE assessments ADD COLUMN marks_locked INTEGER DEFAULT 0",
+                "marks_locked_at": "ALTER TABLE assessments ADD COLUMN marks_locked_at TEXT",
             }
             for name, statement in migrations.items():
                 if name not in columns:
@@ -136,7 +139,7 @@ class Store:
                   AND assessment_id NOT IN (
                       SELECT assessment_id FROM submissions
                   )
-                ORDER BY a.created_at DESC
+                ORDER BY created_at DESC
                 LIMIT 1
                 """,
                 (worker_user_id,),
@@ -403,6 +406,9 @@ class Store:
             "questions": self._json_or_none(row["questions"]),
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
+            "marks_locked": bool(row["marks_locked"]),
+            "marks_locked_at": row["marks_locked_at"],
+            "grading": self._json_or_none(row["grading"]),
             "submitted": submission is not None,
             "submitted_at": submission["created_at"] if submission else None,
             "submission": (
@@ -443,6 +449,16 @@ class Store:
             )
         return result
 
+    @staticmethod
+    def _worker_questions(questions):
+        safe = []
+        for question in questions or []:
+            item = dict(question)
+            item.pop("correct_option", None)
+            item.pop("rubric", None)
+            safe.append(item)
+        return safe
+
     def worker_assessment(self, worker_user_id):
         with self._connection() as connection:
             row = connection.execute(
@@ -458,6 +474,7 @@ class Store:
             return {"exists": False}
 
         questions = self._json_or_none(row["questions"])
+        safe_questions = self._worker_questions(questions)
         return {
             "exists": True,
             "assessment_id": row["assessment_id"],
@@ -465,9 +482,14 @@ class Store:
             "level": row["level"],
             "level_suggestion": self._json_or_none(row["level_suggestion"]),
             "level_approved": bool(row["level_approved"]),
-            "questions": questions if row["questions_approved"] else None,
+            "questions": safe_questions if row["questions_approved"] else None,
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
+            "marks_locked": bool(row["marks_locked"]),
+            "marks_locked_at": row["marks_locked_at"],
+            "grading": self._json_or_none(row["grading"]) if row["marks_locked"] else None,
+            "total_marks": (self._json_or_none(row["grading"]) or {}).get("total_marks") if row["marks_locked"] else None,
+            "max_marks": (self._json_or_none(row["grading"]) or {}).get("max_marks") if row["marks_locked"] else None,
             "submitted": self.has_submission(row["assessment_id"]),
         }
 
@@ -532,6 +554,71 @@ class Store:
             except sqlite3.IntegrityError:
                 return {"accepted": False, "reason": "single_attempt_already_submitted"}
         return {"accepted": True, "assessment_id": assessment_id}
+
+
+    def lock_grading(self, assessment_id, payload):
+        with self._connection() as connection:
+            row = connection.execute("SELECT questions, questions_approved, marks_locked FROM assessments WHERE assessment_id=?", (assessment_id,)).fetchone()
+            if not row:
+                return {"accepted": False, "reason": "assessment_not_found"}
+            if not row["questions_approved"]:
+                return {"accepted": False, "reason": "questions_not_approved"}
+            if row["marks_locked"]:
+                return {"accepted": False, "reason": "marks_already_locked"}
+            submission = connection.execute("SELECT payload FROM submissions WHERE assessment_id=?", (assessment_id,)).fetchone()
+            if not submission:
+                return {"accepted": False, "reason": "assessment_submission_not_found"}
+
+            questions = json.loads(row["questions"] or "[]")
+            submitted = json.loads(submission["payload"] or "{}")
+            answers = {str(a.get("id")): a for a in submitted.get("answers", [])}
+            supplied = payload.get("marks", {})
+            grading, total, maximum = [], 0, 0
+
+            for question in questions:
+                qid = str(question.get("id"))
+                max_marks = max(0, int(question.get("marks", 0)))
+                maximum += max_marks
+                answer = answers.get(qid, {})
+                status, awarded = "unanswered", 0
+                if question.get("type") == "mcq":
+                    try:
+                        selected = int(answer.get("selected_option", -1))
+                    except (TypeError, ValueError):
+                        selected = -1
+                    correct = int(question.get("correct_option", -1))
+                    if selected >= 0:
+                        status = "correct" if selected == correct else "incorrect"
+                    awarded = max_marks if status == "correct" else 0
+                else:
+                    try:
+                        awarded = int(supplied.get(qid, 0))
+                    except (TypeError, ValueError):
+                        awarded = 0
+                    if awarded < 0 or awarded > max_marks:
+                        return {"accepted": False, "reason": f"invalid_marks_for_{qid}"}
+                    status = "marked" if awarded > 0 else "incorrect"
+                total += awarded
+                grading.append({"question_id": qid, "status": status, "marks_awarded": awarded, "max_marks": max_marks})
+
+            grading_record = {"items": grading, "total_marks": total, "max_marks": maximum, "locked": True, "locked_at": self._now()}
+            connection.execute("UPDATE assessments SET grading=?, marks_locked=1, marks_locked_at=? WHERE assessment_id=? AND marks_locked=0", (json.dumps(grading_record), grading_record["locked_at"], assessment_id))
+        return {"accepted": True, "assessment_id": assessment_id, **grading_record}
+
+    def worker_result(self, assessment_id, worker_user_id):
+        row = self._assessment(assessment_id)
+        if not row or row["worker_user_id"] != worker_user_id:
+            return None
+        if not row["marks_locked"]:
+            return {"assessment_id": assessment_id, "locked": False, "total_marks": None, "max_marks": None}
+        grading = self._json_or_none(row["grading"]) or {}
+        return {
+            "assessment_id": assessment_id,
+            "locked": True,
+            "total_marks": grading.get("total_marks", 0),
+            "max_marks": grading.get("max_marks", 0),
+            "locked_at": row["marks_locked_at"],
+        }
 
     def add_evidence(self, evidence_id, assessment_id, task_id, filename, media_type, path, worker_user_id):
         with self._connection() as connection:
