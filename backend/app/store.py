@@ -152,6 +152,14 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_user_by_name(self, name):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE lower(name)=lower(?) LIMIT 1",
+                (name,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def update_user_identity(self, user_id, name, phone, dob):
         with self._connection() as connection:
             connection.execute(
