@@ -84,8 +84,8 @@ def create_access_token(user):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def authenticate(name, phone, dob, password):
-    user = store.get_user_by_identity(name.strip(), phone.strip(), dob.strip())
+def authenticate(name, password):
+    user = store.get_user_by_name(name.strip())
     if not user:
         password_hash.verify(password, DUMMY_HASH)
         return None
