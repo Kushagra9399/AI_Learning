@@ -145,6 +145,12 @@ function Shell({ user, children, onLogout }: { user: User; children: React.React
 }
 
 function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [route, setRoute] = useState(window.location.pathname);
+  useEffect(() => {
+    const handler = () => setRoute(window.location.pathname);
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [candidate, setCandidate] = useState<Candidate>({
     name: "", age: 25, years_experience: 3,
@@ -237,9 +243,36 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
   const questions = assessment?.questions || [];
   const hasSubmitted = assessment?.submitted;
 
+  const page = route;
+  if (assessment && page === "/worker/profile") {
+    return <Shell user={user} onLogout={onLogout}>
+      <section className="page-heading"><p className="eyebrow">MY PROFILE</p><h1>{candidate.name || "Worker profile"}</h1><p className="muted">Your persisted worker information.</p></section>
+      <section className="panel"><div className="form-grid">
+        <label>Name<input value={candidate.name} readOnly /></label><label>Age<input value={candidate.age} readOnly /></label>
+        <label>Years of experience<input value={candidate.years_experience} readOnly /></label><label>Occupation<input value={candidate.occupation} readOnly /></label>
+      </div><label>Work performed / skills<textarea value={candidate.work_context} readOnly /></label><label>Prior training / certificates<textarea value={candidate.prior_training} readOnly /></label></section>
+    </Shell>;
+  }
+  if (assessment && page === "/worker/submission") {
+    return <Shell user={user} onLogout={onLogout}>
+      <section className="page-heading"><p className="eyebrow">SUBMISSION</p><h1>Assessment submission</h1><p className="muted">Your final attempt and current workflow status.</p></section>
+      <section className="panel">{assessment.submitted ? <><div className="status-banner success"><strong>Assessment submitted</strong><span>{assessment.submitted_at ? new Date(assessment.submitted_at).toLocaleString() : ""}</span></div>{(assessment.submission?.answers || []).map((q:any,i:number)=><article className="question-card" key={q.id || i}><div className="question-meta">QUESTION {i+1}</div><h3>{q.question}</h3><p><strong>Response:</strong> {q.options?.length ? (q.selected_option >= 0 ? q.options[q.selected_option] : "Not answered") : (q.response || "Not answered")}</p></article>)}</> : <p className="muted">You have not submitted your assessment.</p>}</section>
+    </Shell>;
+  }
+  if (assessment && page === "/worker/assessment") {
+    return <Shell user={user} onLogout={onLogout}>
+      <section className="page-heading"><p className="eyebrow">ASSESSMENT</p><h1>NSQF Level {assessment.level ?? "Pending"}</h1><p className="muted">Complete your approved assessment.</p></section>
+      {!assessment.level_approved && <section className="panel"><h2>Awaiting approval</h2><p>The administrator has not approved your level yet.</p></section>}
+      {assessment.level_approved && !assessment.questions_approved && <section className="panel"><h2>Questions being prepared</h2><p>Your level is locked. The administrator is reviewing your question package.</p></section>}
+      {assessment.questions_approved && !assessment.started && !assessment.submitted && <section className="panel"><h2>Assessment ready</h2><p>Your approved assessment is ready.</p><button onClick={start}>Start assessment</button></section>}
+      {assessment.started && !assessment.submitted && <section className="panel">{questions.map(question => <article className="question-card" key={question.id}><div className="question-meta">{question.type.toUpperCase()} · {question.marks} marks</div><h3>{question.question}</h3>{question.type === "mcq" ? (question.options || []).map((option,i)=><label className="option" key={i}><input type="radio" name={question.id} checked={answers[question.id]===String(i)} onChange={()=>setAnswers({...answers,[question.id]:String(i)})}/>{option}</label>) : question.type === "text" ? <textarea value={answers[question.id] || ""} onChange={e=>setAnswers({...answers,[question.id]:e.target.value})}/> : <input type="file" accept={question.type === "image" ? "image/*" : "video/*"} onChange={e=>{const f=e.target.files?.[0];if(f)setFiles({...files,[question.id]:f})}}/>}</article>)}<button onClick={submit}>Submit assessment</button></section>}
+    </Shell>;
+  }
+  if (!assessment) return <Shell user={user} onLogout={onLogout}><section className="page-heading"><p className="eyebrow">WORKER PORTAL</p><h1>My profile</h1><p className="muted">Submit your prior experience and training for administrator review.</p></section><section className="panel"><WorkerDeclaration candidate={candidate} setCandidate={setCandidate} onSubmit={createAssessment}/></section>{message && <p className="notice">{message}</p>}</Shell>;
+
   return (
     <Shell user={user} onLogout={onLogout}>
-      <section className="page-heading"><div><p className="eyebrow">WORKER PORTAL</p><h1>Your assessment</h1><p className="muted">Your progress is saved on the server and will remain available after refresh.</p></div></section>
+      <section className="page-heading"><div><p className="eyebrow">WORKER PORTAL</p><h1>Overview</h1><p className="muted">Track your RPL assessment from declaration through submission.</p></div></section><p className="muted">Your progress is saved on the server and will remain available after refresh.</p></div></section>
 
       {!assessment && (
         <section className="panel">
