@@ -422,7 +422,7 @@ class Store:
                        s.created_at AS submitted_at
                 FROM assessments a
                 LEFT JOIN submissions s ON s.assessment_id = a.assessment_id
-                ORDER BY created_at DESC
+                ORDER BY s.created_at DESC
                 """
             ).fetchall()
         result = []
