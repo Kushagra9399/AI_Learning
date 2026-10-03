@@ -115,17 +115,31 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
   );
 }
 
+function navigate(path: string) {
+  window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 function Shell({ user, children, onLogout }: { user: User; children: React.ReactNode; onLogout: () => void }) {
+  const [route, setRoute] = useState(window.location.pathname);
+  useEffect(() => {
+    const handler = () => setRoute(window.location.pathname);
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  const links = user.role === "admin"
+    ? [["/admin/dashboard", "Overview"], ["/admin/assessments", "Assessments"], ["/admin/submissions", "Submissions"]]
+    : [["/worker/dashboard", "Overview"], ["/worker/profile", "My Profile"], ["/worker/assessment", "Assessment"], ["/worker/submission", "Submission"]];
+
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div><strong>RPL Assessment</strong><span>AI-assisted, human-authorized workflow</span></div>
-        <div className="account">
-          <span>{user.username} · {user.role}</span>
-          <button className="secondary" onClick={onLogout}>Sign out</button>
-        </div>
-      </header>
-      {children}
+      <aside className="sidebar">
+        <div className="brand"><div className="brand-mark small">RPL</div><div><strong>RPL Portal</strong><small>{user.role === "admin" ? "Administrator" : "Worker"}</small></div></div>
+        <nav>{links.map(([path, label]) => <button key={path} className={route === path ? "nav-item active" : "nav-item"} onClick={() => navigate(path)}>{label}</button>)}</nav>
+        <div className="sidebar-bottom"><span>{user.username}</span><button className="secondary" onClick={onLogout}>Sign out</button></div>
+      </aside>
+      <section className="content"><header className="mobile-top"><strong>RPL Portal</strong><span>{user.role}</span></header>{children}</section>
     </main>
   );
 }
