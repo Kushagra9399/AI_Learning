@@ -334,6 +334,8 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
 }
 
 function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [route,setRoute]=useState(window.location.pathname);
+  useEffect(()=>{const h=()=>setRoute(window.location.pathname);window.addEventListener("popstate",h);return()=>window.removeEventListener("popstate",h)},[]);
   const [assessments, setAssessments] = useState<any[]>([]);
   const [selected, setSelected] = useState<Assessment | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -426,9 +428,15 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
     setQuestions(current => current.map((q,i) => i===index ? {...q,...changes} : q));
   }
 
+  const selectedId = route.startsWith("/admin/assessments/") ? route.split("/").pop() : null;
+  useEffect(()=>{ if(selectedId && selectedId !== selected?.assessment_id) loadAssessment(selectedId); },[selectedId]);
+  if (route === "/admin/dashboard") return <Shell user={user} onLogout={onLogout}><section className="page-heading"><p className="eyebrow">ADMIN PORTAL</p><h1>Overview</h1><p className="muted">Manage the complete RPL assessment lifecycle.</p></section><section className="status-grid"><div className="status-card"><span>Total assessments</span><strong>{assessments.length}</strong></div><div className="status-card"><span>Awaiting review</span><strong>{assessments.filter(x=>!x.level_approved).length}</strong></div><div className="status-card"><span>Active</span><strong>{assessments.filter(x=>x.questions_approved&&!x.submitted).length}</strong></div><div className="status-card"><span>Submitted</span><strong>{assessments.filter(x=>x.submitted).length}</strong></div></section><section className="panel"><h2>Recent assessments</h2>{assessments.slice(0,5).map(item=><button className="assessment-row" key={item.assessment_id} onClick={()=>navigate("/admin/assessments/"+item.assessment_id)}><span><strong>{item.candidate?.name||"Unnamed worker"}</strong><small>{item.assessment_id}</small></span><span>{item.submitted?"Submitted":"In progress"}</span></button>)}</section></Shell>;
+  if (route === "/admin/submissions") return <Shell user={user} onLogout={onLogout}><section className="page-heading"><p className="eyebrow">ADMIN PORTAL</p><h1>Submissions</h1><p className="muted">Worker attempts submitted for review.</p></section><section className="panel">{assessments.filter(x=>x.submitted).map(item=><button className="assessment-row" key={item.assessment_id} onClick={()=>navigate("/admin/assessments/"+item.assessment_id)}><span><strong>{item.candidate?.name||"Unnamed worker"}</strong><small>{item.submitted_at ? new Date(item.submitted_at).toLocaleString() : "Submitted"}</small></span><span className="badge approved">SUBMITTED</span></button>)}{!assessments.some(x=>x.submitted)&&<p className="muted">No submissions yet.</p>}</section></Shell>;
+  if (route === "/admin/assessments") return <Shell user={user} onLogout={onLogout}><section className="page-heading"><p className="eyebrow">ADMIN PORTAL</p><h1>Assessments</h1><p className="muted">Review every worker assessment.</p></section><section className="panel"><div className="panel-header"><h2>Worker assessments</h2><button className="secondary" onClick={loadList}>Refresh</button></div>{assessments.map(item=><button className="assessment-row" key={item.assessment_id} onClick={()=>navigate("/admin/assessments/"+item.assessment_id)}><span><strong>{item.candidate?.name||"Unnamed worker"}</strong><small>{item.assessment_id}</small></span><span>{item.submitted?"Submitted":item.level?"Level "+item.level:"Level pending"}</span></button>)}</section></Shell>;
+
   return (
     <Shell user={user} onLogout={onLogout}>
-      <section className="page-heading"><div><p className="eyebrow">ADMIN PORTAL</p><h1>Assessment management</h1><p className="muted">Every state transition is persisted and authorization is enforced by the API.</p></div></section>
+      <section className="page-heading"><div><p className="eyebrow">ASSESSMENT REVIEW</p><h1>{selected?.candidate?.name || "Assessment"}</h1><p className="muted">{selected?.assessment_id || "Select an assessment from the Assessments page."}</p></div></section><p className="muted">Every state transition is persisted and authorization is enforced by the API.</p></div></section>
       <div className="admin-layout">
         <section className="panel">
           <div className="panel-header"><h2>Worker assessments</h2><button className="secondary" onClick={loadList}>Refresh</button></div>
