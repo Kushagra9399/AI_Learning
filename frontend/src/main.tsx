@@ -349,6 +349,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   const [questions, setQuestions] = useState<Question[]>([]);
   const [message, setMessage] = useState("");
   const [jobId, setJobId] = useState("");
+  const [gradingMarks, setGradingMarks] = useState<Record<string, number>>({});
 
   async function loadList() {
     try { setAssessments(await api("/admin/assessments")); }
@@ -432,6 +433,36 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to approve questions"); }
   }
 
+  function answerFor(questionId: string) {
+    return selected?.submission?.answers?.find((a:any) => String(a.id) === String(questionId));
+  }
+
+  function objectiveStatus(question: Question) {
+    if (question.type !== "mcq") return null;
+    const answer = answerFor(question.id);
+    if (!answer || answer.selected_option === undefined || Number(answer.selected_option) < 0) return "unanswered";
+    return Number(answer.selected_option) === Number((question as any).correct_option) ? "correct" : "incorrect";
+  }
+
+  async function lockGrading() {
+    if (!selected || !selected.submitted || selected.marks_locked) return;
+    try {
+      const marks: Record<string, number> = {};
+      questions.forEach(q => {
+        if (q.type !== "mcq") marks[q.id] = Number(gradingMarks[q.id] ?? 0);
+      });
+      await api(`/admin/assessments/${selected.assessment_id}/grading/lock`, {
+        method: "POST",
+        body: JSON.stringify({ marks })
+      });
+      await loadAssessment(selected.assessment_id);
+      await loadList();
+      setMessage("Marks locked. The final score is now immutable and visible to the worker.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to lock marks");
+    }
+  }
+
   function updateQuestion(index:number, changes:Partial<Question>) {
     setQuestions(current => current.map((q,i) => i===index ? {...q,...changes} : q));
   }
@@ -511,16 +542,43 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
           </section>}
 
           {detailTab==="answers" && <section className="detail-pane">
-            <div className="panel-header"><div><h3>Worker answers</h3><p className="muted">{selected.submitted ? `Submitted ${selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ""}` : "Not submitted yet"}</p></div><span className={`badge ${selected.submitted ? "approved" : "pending"}`}>{selected.submitted ? "SUBMITTED" : "PENDING"}</span></div>
+            <div className="panel-header">
+              <div><h3>Worker answers</h3><p className="muted">{selected.submitted ? `Submitted ${selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ""}` : "Not submitted yet"}</p></div>
+              <div className="grading-header-actions">
+                {selected.marks_locked ? <span className="badge approved">MARKS LOCKED</span> : selected.submitted ? <button onClick={lockGrading}>Lock & submit marks</button> : null}
+                {selected.grading?.total_marks !== undefined && <strong className="total-score">{selected.grading.total_marks} / {selected.grading.max_marks}</strong>}
+              </div>
+            </div>
             {selected.submitted && selected.submission ? <div className="submission-summary">
-              {(selected.submission.answers || []).map((answer:any,index:number)=><article className="question-card" key={answer.id || index}>
-                <div className="question-meta">QUESTION {index+1} · {answer.type || "TEXT"} · {answer.marks || 0} MARKS</div>
-                <h3>{answer.question}</h3>
-                {answer.options?.length ? <p><strong>Selected:</strong> {answer.selected_option >= 0 ? answer.options[answer.selected_option] : "Not answered"}</p> : <p><strong>Response:</strong> {answer.response || "Not answered"}</p>}
-              </article>)}
-              {selected.evidence?.length > 0 && <p className="muted">Evidence files submitted: {selected.evidence.length}</p>}
+              {(selected.submission.answers || []).map((answer:any,index:number)=>{
+                const q = questions.find(item => String(item.id) === String(answer.id)) || answer;
+                const status = objectiveStatus(q);
+                const lockedItem = selected.grading?.items?.find((item:any)=>String(item.question_id)===String(q.id));
+                const subjective = ["text","image","video"].includes(q.type);
+                const awarded = lockedItem?.marks_awarded ?? gradingMarks[q.id] ?? 0;
+                return <article className={`question-card answer-card ${status==="correct"?"answer-correct":status==="incorrect"?"answer-incorrect":""}`} key={answer.id || index}>
+                  <div className="question-meta">QUESTION {index+1} · {q.type?.toUpperCase() || "TEXT"} · {q.marks || 0} MARKS
+                    {status==="correct" && <span className="answer-badge correct">✓ Correct</span>}
+                    {status==="incorrect" && <span className="answer-badge incorrect">✕ Incorrect</span>}
+                    {status==="unanswered" && <span className="answer-badge unanswered">— Unanswered</span>}
+                  </div>
+                  <h3>{q.question}</h3>
+                  {q.options?.length ? <p><strong>Selected:</strong> {answer.selected_option >= 0 ? q.options[answer.selected_option] : "Not answered"}</p> : <p><strong>Response:</strong> {answer.response || "Not answered"}</p>}
+                  {subjective && <div className="manual-marking">
+                    <label>Admin marks
+                      <input type="number" min="0" max={q.marks || 0} step="1" value={awarded} disabled={selected.marks_locked} onChange={e=>setGradingMarks({...gradingMarks,[q.id]:Number(e.target.value)})}/>
+                      <small>Maximum: {q.marks || 0} marks</small>
+                    </label>
+                    <span className="marking-note">{selected.marks_locked ? "Final mark locked" : "Enter the mark before locking"}</span>
+                  </div>}
+                </article>;
+              })}
+              <div className="grading-footer">
+                <div><span>Final total</span><strong>{selected.marks_locked ? `${selected.grading?.total_marks || 0} / ${selected.grading?.max_marks || 0}` : `${questions.reduce((sum,q)=>sum+(q.type==="mcq" && objectiveStatus(q)==="correct" ? q.marks : q.type!=="mcq" ? Number(gradingMarks[q.id]||0) : 0),0)} / ${questions.reduce((sum,q)=>sum+(q.marks||0),0)}`}</strong></div>
+                {!selected.marks_locked && selected.submitted && <button onClick={lockGrading}>Lock & submit marks</button>}
+              </div>
             </div> : <div className="empty"><p className="muted">The worker has not submitted the assessment yet.</p></div>}
-          </section>}
+          </section>          </section>}
         </section> : <section className="panel empty"><h2>Select an assessment</h2><p className="muted">Choose a worker from the list to review their declaration and assessment state.</p></section>}
       </div>
       {message && <p className="notice">{message}</p>}
