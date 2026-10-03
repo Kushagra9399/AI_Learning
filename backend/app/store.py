@@ -374,6 +374,25 @@ class Store:
         row = self._assessment(assessment_id)
         if not row:
             return None
+        with self._connection() as connection:
+            submission = connection.execute(
+                """
+                SELECT payload, created_at
+                FROM submissions
+                WHERE assessment_id=?
+                """,
+                (assessment_id,),
+            ).fetchone()
+            evidence = connection.execute(
+                """
+                SELECT evidence_id, task_id, filename, media_type, created_at
+                FROM evidence
+                WHERE assessment_id=?
+                ORDER BY created_at
+                """,
+                (assessment_id,),
+            ).fetchall()
+
         return {
             "assessment_id": assessment_id,
             "candidate": self._candidate(row),
@@ -384,15 +403,25 @@ class Store:
             "questions": self._json_or_none(row["questions"]),
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
+            "submitted": submission is not None,
+            "submitted_at": submission["created_at"] if submission else None,
+            "submission": (
+                json.loads(submission["payload"])
+                if submission else None
+            ),
+            "evidence": [dict(item) for item in evidence],
         }
 
     def admin_assessments(self):
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                SELECT assessment_id, candidate, level, level_approved,
-                       questions_approved, started, created_at
-                FROM assessments
+                SELECT a.assessment_id, a.candidate, a.level, a.level_approved,
+                       a.questions_approved, a.started, a.created_at,
+                       CASE WHEN s.assessment_id IS NOT NULL THEN 1 ELSE 0 END AS submitted,
+                       s.created_at AS submitted_at
+                FROM assessments a
+                LEFT JOIN submissions s ON s.assessment_id = a.assessment_id
                 ORDER BY created_at DESC
                 """
             ).fetchall()
@@ -407,6 +436,8 @@ class Store:
                     "level_approved": bool(row["level_approved"]),
                     "questions_approved": bool(row["questions_approved"]),
                     "started": bool(row["started"]),
+                    "submitted": bool(row["submitted"]),
+                    "submitted_at": row["submitted_at"],
                     "created_at": row["created_at"],
                 }
             )
