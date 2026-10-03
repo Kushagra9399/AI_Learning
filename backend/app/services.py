@@ -5,6 +5,7 @@ import httpx
 from dotenv import load_dotenv
 from pathlib import Path
 
+from .nsqf_levels import NSQF_LEVEL_DESCRIPTORS, prompt_level_descriptors
 from .practical import practical_percentage, validate_scores
 from .qp import QP, THEORY_QUESTIONS
 
@@ -128,11 +129,25 @@ def _groq(system_prompt: str, user_prompt: str, max_tokens: int = 1800):
 
 
 def level_context(level: int):
-    return LEVEL_CONTEXT.get(int(level), LEVEL_CONTEXT[4])
+    return NSQF_LEVEL_DESCRIPTORS.get(int(level), NSQF_LEVEL_DESCRIPTORS[4])
 
 
 def _compact_level_context(level: int) -> str:
-    return json.dumps(level_context(level), separators=(",", ":"))
+    level = int(level)
+    if level <= 5:
+        return json.dumps(level_context(level), separators=(",", ":"))
+    return json.dumps(
+        {
+            "level": level,
+            "descriptor_status": "stored_locally_but_not_sent_to_llm",
+            "message": "Detailed descriptors for Levels 6–8 will be supplied through the future NQR API.",
+        },
+        separators=(",", ":"),
+    )
+
+
+def _prompt_nsqf_context() -> str:
+    return json.dumps(prompt_level_descriptors(), separators=(",", ":"))
 
 
 def infer_level(candidate: dict) -> dict:
@@ -153,20 +168,37 @@ def infer_level(candidate: dict) -> dict:
     fallback_level = 4 if is_electrical and years >= 3 else 3 if years >= 2 else 2
 
     prompt = f"""
-Assess the likely NSQF level for this worker declaration.
+Assess the likely NSQF level for this worker declaration using the supplied NSQF learning-outcome descriptors.
+
+CURRENT PROMPT LIMIT:
+- Compare Levels 1–5 only.
+- Do not recommend Levels 6–8.
+- Levels 6–8 are stored for future API-backed use.
+- A human administrator makes the final decision.
+
+NSQF descriptors:
+{_prompt_nsqf_context()}
 
 Return JSON only:
 {{
   "suggested_level": 1,
   "confidence": 0.0,
-  "reason": "short explanation",
-  "evidence": ["short evidence point"]
+  "reason": "short explanation tied to descriptor dimensions",
+  "evidence": ["specific evidence from the worker declaration"],
+  "matched_dimensions": {{
+    "knowledge": "short",
+    "technical_skills": "short",
+    "aptitude_employability": "short",
+    "learning_outcomes": "short",
+    "responsibility": "short"
+  }},
+  "gaps": ["missing evidence or competency gap"]
 }}
 
 Rules:
-- This is only a provisional recommendation.
-- Do not certify the worker.
-- Do not invent qualifications.
+- This is only a provisional recommendation, not certification.
+- Do not invent qualifications, certificates, experience, or competencies.
+- Treat education/certificates as supporting evidence, not the sole basis.
 - Keep the recommendation grounded in the supplied declaration.
 
 Worker declaration:
@@ -181,7 +213,7 @@ Worker declaration:
 
     if ai_result and isinstance(ai_result.get("suggested_level"), int):
         ai_result["suggested_level"] = max(
-            1, min(8, ai_result["suggested_level"])
+            1, min(5, ai_result["suggested_level"])
         )
         return ai_result
 
