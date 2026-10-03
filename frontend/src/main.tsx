@@ -464,6 +464,18 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to approve level"); }
   }
 
+  async function unlockLevel() {
+    if (!selected || !selected.level_approved) return;
+    try {
+      await api(`/admin/assessments/${selected.assessment_id}/level-unlock`, { method: "POST" });
+      await loadAssessment(selected.assessment_id);
+      await loadList();
+      setMessage("NSQF level unlocked. The dropdown is editable again and the AI recommendation can be regenerated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to unlock level");
+    }
+  }
+
   async function generateQuestions() {
     if (!selected || !selected.level_approved || selected.questions_approved) return;
     try {
@@ -570,7 +582,10 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
                 {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
                 {!selected.level_approved
                   ? <button onClick={approveLevel} disabled={selectedLevel === ""}>Approve & lock level</button>
-                  : <span className="badge approved">LEVEL LOCKED</span>}
+                  : <>
+                      <span className="badge approved">LEVEL LOCKED</span>
+                      <button className="secondary" onClick={unlockLevel}>Unlock level</button>
+                    </>}
               </div>
             </section>
           </section>}
