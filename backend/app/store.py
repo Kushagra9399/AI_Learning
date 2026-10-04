@@ -77,6 +77,11 @@ class Store:
                     job_error TEXT,
                     job_acknowledged INTEGER DEFAULT 0,
                     job_updated_at TEXT,
+                    submission_payload TEXT,
+                    submitted_at TEXT,
+                    signoff_payload TEXT,
+                    signed_off INTEGER DEFAULT 0,
+                    signoff_at TEXT,
                     created_at TEXT
                 );
 
@@ -125,6 +130,11 @@ class Store:
                 "job_error": "ALTER TABLE assessments ADD COLUMN job_error TEXT",
                 "job_acknowledged": "ALTER TABLE assessments ADD COLUMN job_acknowledged INTEGER DEFAULT 0",
                 "job_updated_at": "ALTER TABLE assessments ADD COLUMN job_updated_at TEXT",
+                "submission_payload": "ALTER TABLE assessments ADD COLUMN submission_payload TEXT",
+                "submitted_at": "ALTER TABLE assessments ADD COLUMN submitted_at TEXT",
+                "signoff_payload": "ALTER TABLE assessments ADD COLUMN signoff_payload TEXT",
+                "signed_off": "ALTER TABLE assessments ADD COLUMN signed_off INTEGER DEFAULT 0",
+                "signoff_at": "ALTER TABLE assessments ADD COLUMN signoff_at TEXT",
             }
             for name, statement in migrations.items():
                 if name not in columns:
@@ -142,6 +152,54 @@ class Store:
                     connection.execute("ALTER TABLE assessments DROP COLUMN questions_draft")
                 except sqlite3.OperationalError:
                     pass
+
+            # Migrate legacy submission/signoff rows into the canonical
+            # assessment row before removing the redundant tables.
+            legacy_submissions = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='submissions'"
+            ).fetchone()
+            if legacy_submissions:
+                connection.execute("""
+                    UPDATE assessments
+                    SET submission_payload = (
+                        SELECT payload FROM submissions s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    ),
+                    submitted_at = (
+                        SELECT created_at FROM submissions s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM submissions s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    )
+                """)
+                connection.execute("DROP TABLE submissions")
+
+            legacy_signoffs = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='signoffs'"
+            ).fetchone()
+            if legacy_signoffs:
+                connection.execute("""
+                    UPDATE assessments
+                    SET signoff_payload = (
+                        SELECT payload FROM signoffs s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    ),
+                    signed_off = CASE WHEN EXISTS (
+                        SELECT 1 FROM signoffs s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    ) THEN 1 ELSE signed_off END,
+                    signoff_at = (
+                        SELECT created_at FROM signoffs s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM signoffs s
+                        WHERE s.assessment_id = assessments.assessment_id
+                    )
+                """)
+                connection.execute("DROP TABLE signoffs")
 
             # The old jobs table duplicated task identity/state. The
             # assessment row now owns that state and uses assessment_id as job_id.
@@ -215,9 +273,7 @@ class Store:
                        level_approved, questions_approved, started
                 FROM assessments
                 WHERE worker_user_id=?
-                  AND assessment_id NOT IN (
-                      SELECT assessment_id FROM submissions
-                  )
+                  AND submitted_at IS NULL
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
@@ -580,14 +636,6 @@ class Store:
         if not row:
             return None
         with self._connection() as connection:
-            submission = connection.execute(
-                """
-                SELECT payload, created_at
-                FROM submissions
-                WHERE assessment_id=?
-                """,
-                (assessment_id,),
-            ).fetchone()
             evidence = connection.execute(
                 """
                 SELECT evidence_id, task_id, filename, media_type, created_at
@@ -604,19 +652,16 @@ class Store:
             "level": row["level"],
             "level_suggestion": self._json_or_none(row["level_suggestion"]),
             "level_approved": bool(row["level_approved"]),
-            "questions_draft": self._json_or_none(row["questions_draft"]),
+            "questions_draft": self._json_or_none(row["questions"]),
             "questions": self._json_or_none(row["questions"]),
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
             "marks_locked": bool(row["marks_locked"]),
             "marks_locked_at": row["marks_locked_at"],
             "grading": self._json_or_none(row["grading"]),
-            "submitted": submission is not None,
-            "submitted_at": submission["created_at"] if submission else None,
-            "submission": (
-                json.loads(submission["payload"])
-                if submission else None
-            ),
+            "submitted": row["submitted_at"] is not None,
+            "submitted_at": row["submitted_at"],
+            "submission": self._json_or_none(row["submission_payload"]),
             "evidence": [dict(item) for item in evidence],
         }
 
@@ -626,11 +671,10 @@ class Store:
                 """
                 SELECT a.assessment_id, a.candidate, a.level, a.level_approved,
                        a.questions_approved, a.started, a.created_at,
-                       CASE WHEN s.assessment_id IS NOT NULL THEN 1 ELSE 0 END AS submitted,
-                       s.created_at AS submitted_at
+                       CASE WHEN a.submitted_at IS NOT NULL THEN 1 ELSE 0 END AS submitted,
+                       a.submitted_at AS submitted_at
                 FROM assessments a
-                LEFT JOIN submissions s ON s.assessment_id = a.assessment_id
-                ORDER BY s.created_at DESC
+                ORDER BY a.submitted_at DESC, a.created_at DESC
                 """
             ).fetchall()
         result = []
@@ -725,17 +769,17 @@ class Store:
     def has_submission(self, assessment_id):
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT 1 FROM submissions WHERE assessment_id=?",
+                "SELECT submitted_at FROM assessments WHERE assessment_id=?",
                 (assessment_id,),
             ).fetchone()
-        return row is not None
+        return bool(row and row["submitted_at"])
 
     def submit(self, payload, worker_user_id):
         assessment_id = payload["assessment_id"]
         with self._connection() as connection:
             row = connection.execute(
                 """
-                SELECT started, worker_user_id
+                SELECT started, worker_user_id, submitted_at
                 FROM assessments WHERE assessment_id=?
                 """,
                 (assessment_id,),
@@ -744,16 +788,18 @@ class Store:
                 return {"accepted": False, "reason": "assessment_not_found"}
             if not row["started"]:
                 return {"accepted": False, "reason": "assessment_not_started"}
-            try:
-                connection.execute(
-                    """
-                    INSERT INTO submissions
-                    (assessment_id, payload, created_at)
-                    VALUES (?, ?, ?)
-                    """,
-                    (assessment_id, json.dumps(payload), self._now()),
-                )
-            except sqlite3.IntegrityError:
+            if row["submitted_at"]:
+                return {"accepted": False, "reason": "single_attempt_already_submitted"}
+            submitted_at = self._now()
+            connection.execute(
+                """
+                UPDATE assessments
+                SET submission_payload=?, submitted_at=?
+                WHERE assessment_id=? AND submitted_at IS NULL
+                """,
+                (json.dumps(payload), submitted_at, assessment_id),
+            )
+            if connection.total_changes == 0:
                 return {"accepted": False, "reason": "single_attempt_already_submitted"}
         return {"accepted": True, "assessment_id": assessment_id}
 
@@ -767,12 +813,12 @@ class Store:
                 return {"accepted": False, "reason": "questions_not_approved"}
             if row["marks_locked"]:
                 return {"accepted": False, "reason": "marks_already_locked"}
-            submission = connection.execute("SELECT payload FROM submissions WHERE assessment_id=?", (assessment_id,)).fetchone()
+            submission = row["submission_payload"]
             if not submission:
                 return {"accepted": False, "reason": "assessment_submission_not_found"}
 
             questions = json.loads(row["questions"] or "[]")
-            submitted = json.loads(submission["payload"] or "{}")
+            submitted = json.loads(submission or "{}")
             answers = {str(a.get("id")): a for a in submitted.get("answers", [])}
             supplied = payload.get("marks", {})
             grading, total, maximum = [], 0, 0
@@ -842,16 +888,8 @@ class Store:
 
     def assessor(self, assessment_id):
         with self._connection() as connection:
-            submission = connection.execute(
-                "SELECT payload FROM submissions WHERE assessment_id=?",
-                (assessment_id,),
-            ).fetchone()
             assessment = connection.execute(
                 "SELECT * FROM assessments WHERE assessment_id=?",
-                (assessment_id,),
-            ).fetchone()
-            signoff = connection.execute(
-                "SELECT payload FROM signoffs WHERE assessment_id=?",
                 (assessment_id,),
             ).fetchone()
             evidence = connection.execute(
@@ -863,10 +901,10 @@ class Store:
             ).fetchall()
         return {
             "assessment_id": assessment_id,
-            "submission": json.loads(submission["payload"]) if submission else None,
+            "submission": self._json_or_none(assessment["submission_payload"]) if assessment else None,
             "assessment": dict(assessment) if assessment else None,
             "evidence": [dict(item) for item in evidence],
-            "signoff": json.loads(signoff["payload"]) if signoff else None,
+            "signoff": self._json_or_none(assessment["signoff_payload"]) if assessment else None,
             "final_authority": "human_assessor",
         }
 
@@ -874,11 +912,11 @@ class Store:
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO signoffs
-                (assessment_id, payload, created_at)
-                VALUES (?, ?, ?)
+                UPDATE assessments
+                SET signoff_payload=?, signed_off=1, signoff_at=?
+                WHERE assessment_id=?
                 """,
-                (assessment_id, json.dumps(payload), self._now()),
+                (json.dumps(payload), self._now(), assessment_id),
             )
         return {
             "assessment_id": assessment_id,
