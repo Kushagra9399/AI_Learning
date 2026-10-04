@@ -297,7 +297,27 @@ class Store:
         return dict(row) if row else None
 
     def create_worker_assessment(self, worker_user_id, candidate, assessment_id=None):
+        candidate_data = dict(candidate)
+        candidate_data.pop("assessment_id", None)
         with self._connection() as connection:
+            if assessment_id:
+                identified = connection.execute(
+                    "SELECT * FROM assessments WHERE assessment_id=?",
+                    (assessment_id,),
+                ).fetchone()
+                if identified:
+                    if identified["worker_user_id"] != worker_user_id:
+                        raise ValueError("assessment_id belongs to another worker")
+                    return {
+                        "assessment_id": assessment_id,
+                        "existing": True,
+                        "level": identified["level"],
+                        "level_suggestion": self._json_or_none(identified["level_suggestion"]),
+                        "level_approved": bool(identified["level_approved"]),
+                        "questions_approved": bool(identified["questions_approved"]),
+                        "started": bool(identified["started"]),
+                    }
+
             existing = connection.execute(
                 """
                 SELECT assessment_id, level, level_suggestion,
@@ -336,7 +356,7 @@ class Store:
                 (
                     assessment_id,
                     worker_user_id,
-                    json.dumps(candidate),
+                    json.dumps(candidate_data),
                     self._now(),
                 ),
             )
@@ -350,7 +370,6 @@ class Store:
             "questions_approved": False,
             "started": False,
         }
-
     def job(self, kind, payload):
         assessment_id = payload.get("assessment_id")
         if not assessment_id:
