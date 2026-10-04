@@ -260,7 +260,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
     };
     const unregister = registerOfflineSync(sender);
     void load();
-    getAnswers(user.id).then(setAnswers).catch(() => {});
+    if (assessment?.assessment_id) getAnswers(user.id, assessment.assessment_id).then(setAnswers).catch(() => {});
     return unregister;
   }, []);
   useEffect(() => {
