@@ -156,6 +156,7 @@ export async function syncPendingOperations(sender: (operation: QueueOperation) 
   try {
     const now = Date.now();
     const existing = await allQueueItems();
+
     // A tab/browser crash can leave an operation in "syncing" forever.
     for (const stale of existing) {
       if (stale.status === "syncing" && now - stale.updated_at > 30000) {
@@ -166,36 +167,48 @@ export async function syncPendingOperations(sender: (operation: QueueOperation) 
     }
 
     const operations = (await allQueueItems())
-    .filter(item => (item.status === "pending" || item.status === "failed") && (!item.next_retry_at || item.next_retry_at <= Date.now()))
-    .sort((a, b) => a.created_at - b.created_at);
+      .filter(
+        item =>
+          (item.status === "pending" || item.status === "failed") &&
+          (!item.next_retry_at || item.next_retry_at <= Date.now())
+      )
+      .sort((a, b) => a.created_at - b.created_at);
 
     let synced = 0;
     let pending = 0;
 
     for (const operation of operations) {
       if (!(await backendReachable())) break;
-      operation.status = "syncing";
-    operation.updated_at = Date.now();
-    await updateQueue(operation);
 
-    try {
-      await sender(operation);
-      operation.status = "synced";
-      operation.last_error = undefined;
-      operation.next_retry_at = undefined;
+      operation.status = "syncing";
       operation.updated_at = Date.now();
       await updateQueue(operation);
-      synced += 1;
-    } catch (error) {
-      operation.status = "pending";
-      operation.retry_count += 1;
-      operation.last_error = error instanceof Error ? error.message : String(error);
-      operation.next_retry_at = Date.now() + Math.min(60000, 1000 * Math.pow(2, Math.min(operation.retry_count - 1, 6)));
-      operation.updated_at = Date.now();
-      await updateQueue(operation);
-      pending += 1;
-      console.warn("[SYNC] retry scheduled", operation.assessment_id, operation.operation_type, operation.last_error);
-      if (!(await backendReachable())) break;
+
+      try {
+        await sender(operation);
+        operation.status = "synced";
+        operation.last_error = undefined;
+        operation.next_retry_at = undefined;
+        operation.updated_at = Date.now();
+        await updateQueue(operation);
+        synced += 1;
+      } catch (error) {
+        operation.status = "pending";
+        operation.retry_count += 1;
+        operation.last_error = error instanceof Error ? error.message : String(error);
+        operation.next_retry_at =
+          Date.now() + Math.min(60000, 1000 * Math.pow(2, Math.min(operation.retry_count - 1, 6)));
+        operation.updated_at = Date.now();
+        await updateQueue(operation);
+        pending += 1;
+        console.warn(
+          "[SYNC] retry scheduled",
+          operation.assessment_id,
+          operation.operation_type,
+          operation.last_error
+        );
+        if (!(await backendReachable())) break;
+      }
     }
 
     return { synced, pending };
@@ -203,7 +216,6 @@ export async function syncPendingOperations(sender: (operation: QueueOperation) 
     syncInProgress = false;
   }
 }
-
 export function registerOfflineSync(sender: (operation: QueueOperation) => Promise<void>) {
   const attempt = () => {
     if (navigator.onLine === false) {
