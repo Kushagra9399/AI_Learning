@@ -471,30 +471,7 @@ class Store:
         return {"assessment_id": assessment_id, "level": level, "approved": True}
 
     def unlock_level(self, assessment_id):
-        with self._connection() as connection:
-            row = connection.execute(
-                """
-                SELECT level, level_approved, questions_approved, started
-                FROM assessments WHERE assessment_id=?
-                """,
-                (assessment_id,),
-            ).fetchone()
-            if not row:
-                return {"unlocked": False, "reason": "assessment_not_found"}
-            if not row["level_approved"]:
-                return {"unlocked": False, "reason": "level_not_locked"}
-            if row["questions_approved"] or row["started"] or self.has_submission(assessment_id):
-                return {"unlocked": False, "reason": "level_cannot_be_unlocked_after_assessment_progress"}
-
-            connection.execute(
-                """
-                UPDATE assessments
-                SET level=NULL, level_approved=0
-                WHERE assessment_id=? AND level_approved=1
-                """,
-                (assessment_id,),
-            )
-        return {"assessment_id": assessment_id, "unlocked": True}
+        return {"unlocked": False, "reason": "level_is_immutable_after_approval"}
 
     def save_questions(self, assessment_id, questions):
         with self._connection() as connection:
