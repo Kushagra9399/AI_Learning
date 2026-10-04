@@ -38,24 +38,7 @@ class Store:
                     created_at TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id TEXT PRIMARY KEY,
-                    type TEXT,
-                    status TEXT,
-                    progress INTEGER,
-                    result TEXT,
-                    error TEXT,
-                    payload TEXT,
-                    acknowledged INTEGER DEFAULT 0,
-                    created_at TEXT,
-                    updated_at TEXT
-                );
 
-                CREATE TABLE IF NOT EXISTS submissions (
-                    assessment_id TEXT PRIMARY KEY,
-                    payload TEXT,
-                    created_at TEXT
-                );
 
                 CREATE TABLE IF NOT EXISTS assessments (
                     assessment_id TEXT PRIMARY KEY,
@@ -85,11 +68,6 @@ class Store:
                     created_at TEXT
                 );
 
-                CREATE TABLE IF NOT EXISTS signoffs (
-                    assessment_id TEXT PRIMARY KEY,
-                    payload TEXT,
-                    created_at TEXT
-                );
 
                 CREATE TABLE IF NOT EXISTS evidence (
                     evidence_id TEXT PRIMARY KEY,
@@ -582,7 +560,6 @@ class Store:
             "level": row["level"],
             "level_suggestion": self._json_or_none(row["level_suggestion"]),
             "level_approved": bool(row["level_approved"]),
-            "questions_draft": self._json_or_none(row["questions"]),
             "questions": self._json_or_none(row["questions"]),
             "questions_approved": bool(row["questions_approved"]),
             "started": bool(row["started"]),
