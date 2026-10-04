@@ -1,153 +1,130 @@
+# AI-Assisted Skill Assessment Tool for Recognition of Prior Learning (RPL)
 
----
+This branch implements an MSDE/NCVET-oriented RPL workflow for **Construction Electrician - LV (CON/Q0603), Version 5.0, NSQF Level 4**.
 
-#  AI-Powered Adaptive Learning Roadmap Generator
+## Implemented scope
 
-> **An intelligent learning assistant that interviews users, assesses skill levels, generates adaptive study roadmaps, and tracks progress using LLM + automation agents.**
+- Structured self-declaration and deterministic QP mapping.
+- QP/NOS/PC competency model with fixed identifiers and official QP reference.
+- Async assessment-package generation with `job_id`, status polling and ACK.
+- Theory questions mapped to NOS and PC.
+- Practical tasks with standardized, assessor-entered rubrics and safety instructions.
+- Photo/video evidence capture in the browser.
+- Offline assessment/evidence storage using IndexedDB and a service-worker shell.
+- Reconnection queue for assessment/evidence synchronization.
+- Single-attempt enforcement using a persistent SQLite submission store.
+- Persistent async jobs with retry-friendly status records.
+- Assessor-facing API containing submission, evidence and sign-off data.
+- Validation harness for inter-assessor agreement metrics.
 
----
-## 🧩 Problem Statement
+## RPL workflow
 
-> Build an intelligent agent-based learning system that interviews users, assesses skill levels, generates personalized weekly roadmaps, dynamically adapts to feedback, and continuously tracks learning progress.
+```
+Self declaration
+      |
+      v
+QP / NOS / PC mapping
+      |
+      +--> Theory assessment
+      |
+      +--> Practical tasks --> Photo/video evidence
+      |
+      v
+Standardized scoring
+      |
+      v
+Competency profile + gap analysis
+      |
+      v
+AI recommendation
+      |
+      v
+Human assessor review / override / sign-off
+```
 
----
+The system does **not** issue a certificate and does not treat AI output as a certification decision.
 
-## 📌 Overview
+## Offline workflow
 
-Traditional learning platforms provide **static content and generic learning paths**, which often fail to adapt to individual learner needs, pace, and goals.
+1. Connect once to download the assessment package.
+2. Questions are stored in IndexedDB.
+3. The theory attempt and evidence metadata/media are stored locally.
+4. The attempt is single-use.
+5. When connectivity returns, the browser queues evaluation and evidence sync.
+6. Backend persists jobs/submissions/evidence metadata in SQLite.
+7. Job polling is the guaranteed browser delivery mechanism; an inbound browser webhook is not assumed.
 
-This project introduces an **AI-powered adaptive learning system** that:
+## Run
 
-* Understands the learner’s **goal, competency level, and time constraints**
-* Conducts an **AI-based diagnostic assessment**
-* Generates a **personalized, structured learning roadmap**
-* Continuously **tracks progress and adapts plans**
-* Automates **resource discovery and workflow orchestration** using intelligent agents
+### Backend
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
 
-The system leverages **Large Language Models (LLMs)** and **workflow automation agents (n8n)** to create a **dynamic, student-centric learning experience**.
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
----
+## Validation
 
-## 🎯 Target Users
+Run the example harness with:
 
-* School Students
-* College Students
-* Competitive Exam Aspirants
+```bash
+cd backend
+python validation/test_inter_assessor.py
+```
 
----
+The example numbers are placeholders only. For a credible problem-statement submission, replace them with anonymized scores from multiple assessors on a fixed test set and report agreement statistics without claiming improvement until measured.
 
-##  Key Features
+## Assessor boundary
 
-### ✅ Implemented Features
+AI may help organize evidence, generate question wording and calculate standardized scores. It must not invent QP/NOS/PC identifiers, alter official pass rules, authenticate evidence by itself, or issue certification. The authorized assessor retains final judgement, can override AI-assisted results with a reason, and signs off the competency outcome.
 
-* **Smart Onboarding Form (React.js UI)**
+## Reference
 
-  * Captures learning goal, current skill level, and time availability.
-
-* **AI-Based Diagnostic Test Generation**
-
-  * Automatically generates **10 adaptive questions** (easy, medium, hard).
-  * Evaluates competency and identifies **knowledge gaps**.
-
-* **Automated Competency Evaluation**
-
-  * Calculates scores.
-  * Highlights strengths and improvement areas.
-
-* **Personalized Structured Learning Roadmap**
-
-  * Generates **weekly/day-wise learning plans**.
-  * Adapts difficulty based on user competency.
-
-* **Progress Tracking using Automation Agent**
-
-  * Stores **learning progress in Google Sheets**.
-  * Maintains long-term learning history.
-
----
-
-### Future Enhancements
-
-*  Automated **email reminders & deadline alerts**
-* **Dynamic roadmap adaptation** based on continuous feedback
-*  Visual analytics dashboard
-*  Concept-level weakness detection & revision planning
-
----
-
-## 🏗️ System Architecture
-
- **WorkFlow Diagram** 
-![arch diag](images/image.png)
-
----
-
-## ⚙️ Tech Stack
-
-| Layer               | Technology             |
-| ------------------- | ---------------------- |
-| Frontend            | React.js               |
-| Backend             | Serverless APIs        |
-| AI Model            | Groq – OpenAI OSS 120B |
-| Agent Orchestration | n8n                    |
-| Database            | Google Sheets          |
-| Deployment          | Local                  |
-
----
-
-## 🔁 Workflow Pipeline
-
-1. User submits learning preferences via React UI.
-2. Backend forwards request to **n8n automation workflow**.
-3. n8n sends structured prompts to **Groq LLM**.
-4. LLM:
-
-   * Generates diagnostic test
-   * Evaluates responses
-   * Builds structured learning roadmap
-5. n8n stores progress data into **Google Sheets**.
-6. Roadmap and evaluation are displayed on the user dashboard.
+Official QP: https://s3.ap-south-1.amazonaws.com/nsdcproddocuments/qpPdf/CON_Q0603_v5.0.pdf
 
 
----
+## Authentication and persistent workflow
 
-## 🌟 Innovation & Uniqueness
+The RPL application uses role-based JWT authentication with two roles:
 
-* **Adaptive learning intelligence instead of static courses**
-* **Agent-based orchestration using n8n**
-* **Dynamic competency evaluation using LLM reasoning**
-* **Fully automated progress tracking**
-* **Scalable design for future adaptive coaching**
+- **Admin**: manages worker assessments, reviews AI recommendations, approves and locks the NSQF level, and reviews/approves generated question packages.
+- **Worker**: submits their declaration, sees only their own persisted assessment, and can start/submit only after administrator approval.
 
----
+Assessment state is stored in SQLite. AI question generation is persisted as a **draft** before administrator approval. Once the NSQF level is approved it is immutable, and the API rejects new AI level recommendations for that assessment. Once questions are approved, the active question package is immutable through the generation flow.
 
-## 👥 Team Members
+### Authentication configuration
 
-| Name                  | Role                                  |
-| --------------------- | ------------------------------------- |
-| **Shivam Chopade**    | System Architecture & AI Integration  |
-| **Pratik Patil**      | Frontend Development                  |
-| **Kushagra Prajapat** | Automation & n8n Workflow Engineering |
+Copy `backend/.env.example` to `backend/.env` and set:
 
----
+```env
+JWT_SECRET=<long-random-secret>
+ADMIN_PASSWORD=<admin-password>
+WORKER_PASSWORD=<worker-password>
+```
 
-## Example Use Case
+The default usernames created at startup are `admin` and `worker`. Passwords are hashed with Argon2; JWTs are used for authenticated API access.
 
-> A student preparing for **DSA interviews in 2 months** enters their goal and current level.
-> The system:
->
-> * Generates a diagnostic test
-> * Identifies weak concepts
-> * Creates a structured weekly roadmap
-> * Tracks learning progress automatically
-> * (Future) Sends reminders & adapts learning plan
+Start the backend and frontend normally:
 
----
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 
-## 🏁 Conclusion
+# another terminal
+cd frontend
+npm install
+npm run dev
+```
 
-This project demonstrates the **practical integration of AI + automation agents** to build a **truly adaptive learning platform**, addressing real-world challenges in personalized education.
-
----
-
-#
+Open the frontend at `http://localhost:5173`. The application always starts at the login screen and selects the dashboard from the authenticated user's server-side role.
