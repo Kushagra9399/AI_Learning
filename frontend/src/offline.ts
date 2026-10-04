@@ -35,52 +35,41 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-function tx(storeName: string, mode: IDBTransactionMode): Promise<IDBObjectStore> {
-  return openDb().then(db => new Promise((resolve, reject) => {
+async function request<T>(storeName: string, mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, mode);
-    transaction.oncomplete = () => db.close();
+    const store = transaction.objectStore(storeName);
+    const operation = action(store);
+    operation.onsuccess = () => resolve(operation.result);
+    operation.onerror = () => reject(operation.error || new Error("IndexedDB request failed"));
     transaction.onerror = () => reject(transaction.error || new Error("IndexedDB transaction failed"));
-    resolve(transaction.objectStore(storeName));
-  }));
+    transaction.oncomplete = () => db.close();
+  });
 }
 
-export async function cacheAssessment(userId: number, assessment: any) {
-  const store = await tx(ASSESSMENTS, "readwrite");
-  return new Promise<void>((resolve, reject) => {
-    const request = store.put({ key: String(userId), assessment, updated_at: Date.now() });
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+export function cacheAssessment(userId: number, assessment: any) {
+  return request(ASSESSMENTS, "readwrite", store => store.put({ key: String(userId), assessment, updated_at: Date.now() }));
 }
 
 export async function getCachedAssessment(userId: number): Promise<any | null> {
-  const store = await tx(ASSESSMENTS, "readonly");
-  return new Promise((resolve, reject) => {
-    const request = store.get(String(userId));
-    request.onsuccess = () => resolve(request.result?.assessment ?? null);
-    request.onerror = () => reject(request.error);
-  });
+  return (await request<any>(ASSESSMENTS, "readonly", store => store.get(String(userId))))?.assessment ?? null;
 }
 
-export async function saveAnswers(userId: number, assessmentId: string, answers: Record<string, string>) {
-  const store = await tx(ANSWERS, "readwrite");
-  return new Promise<void>((resolve, reject) => {
-    const request = store.put({ key: String(userId), assessment_id: assessmentId, answers, updated_at: Date.now() });
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+export function saveAnswers(userId: number, assessmentId: string, answers: Record<string, string>) {
+  return request(ANSWERS, "readwrite", store => store.put({
+    key: `${userId}:${assessmentId}`,
+    assessment_id: assessmentId,
+    answers,
+    updated_at: Date.now(),
+  }));
 }
 
-export async function getAnswers(userId: number): Promise<Record<string, string>> {
-  const store = await tx(ANSWERS, "readonly");
-  return new Promise((resolve, reject) => {
-    const request = store.get(String(userId));
-    request.onsuccess = () => resolve(request.result?.answers ?? {});
-    request.onerror = () => reject(request.error);
-  });
+export async function getAnswers(userId: number, assessmentId: string): Promise<Record<string, string>> {
+  return (await request<any>(ANSWERS, "readonly", store => store.get(`${userId}:${assessmentId}`)))?.answers ?? {};
 }
 
-export async function saveEvidence(record: {
+export function saveEvidence(record: {
   evidence_id: string;
   assessment_id: string;
   task_id: string;
@@ -88,57 +77,32 @@ export async function saveEvidence(record: {
   filename: string;
   media_type: string;
 }) {
-  const store = await tx(EVIDENCE, "readwrite");
-  return new Promise<void>((resolve, reject) => {
-    const request = store.put({ ...record, created_at: Date.now() });
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+  return request(EVIDENCE, "readwrite", store => store.put({ ...record, created_at: Date.now() }));
 }
 
-export async function getEvidence(evidenceId: string): Promise<any | null> {
-  const store = await tx(EVIDENCE, "readonly");
-  return new Promise((resolve, reject) => {
-    const request = store.get(evidenceId);
-    request.onsuccess = () => resolve(request.result ?? null);
-    request.onerror = () => reject(request.error);
-  });
+export function getEvidence(evidenceId: string): Promise<any | null> {
+  return request<any>(EVIDENCE, "readonly", store => store.get(evidenceId));
 }
 
 export async function enqueueOperation(input: Omit<QueueOperation, "queue_id" | "created_at" | "updated_at" | "retry_count" | "status">) {
-  const now = Date.now();
   const operation: QueueOperation = {
     ...input,
     queue_id: `${input.operation_type}_${input.assessment_id}_${crypto.randomUUID()}`,
-    created_at: now,
-    updated_at: now,
+    created_at: Date.now(),
+    updated_at: Date.now(),
     retry_count: 0,
     status: "pending",
   };
-  const store = await tx(QUEUE, "readwrite");
-  return new Promise<QueueOperation>((resolve, reject) => {
-    const request = store.put(operation);
-    request.onsuccess = () => resolve(operation);
-    request.onerror = () => reject(request.error);
-  });
+  await request(QUEUE, "readwrite", store => store.put(operation));
+  return operation;
 }
 
 async function allQueueItems(): Promise<QueueOperation[]> {
-  const store = await tx(QUEUE, "readonly");
-  return new Promise((resolve, reject) => {
-    const request = store.getAll();
-    request.onsuccess = () => resolve(request.result as QueueOperation[]);
-    request.onerror = () => reject(request.error);
-  });
+  return (await request<QueueOperation[]>(QUEUE, "readonly", store => store.getAll())) || [];
 }
 
-async function updateQueue(operation: QueueOperation) {
-  const store = await tx(QUEUE, "readwrite");
-  return new Promise<void>((resolve, reject) => {
-    const request = store.put(operation);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+function updateQueue(operation: QueueOperation) {
+  return request(QUEUE, "readwrite", store => store.put(operation));
 }
 
 export async function getQueueStatus(assessmentId: string): Promise<SyncStatus | null> {
@@ -149,16 +113,11 @@ export async function getQueueStatus(assessmentId: string): Promise<SyncStatus |
   return "pending";
 }
 
-export async function syncPendingOperations(
-  sender: (operation: QueueOperation) => Promise<void>
-): Promise<{ synced: number; pending: number }> {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return { synced: 0, pending: 0 };
-  }
+export async function syncPendingOperations(sender: (operation: QueueOperation) => Promise<void>) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return { synced: 0, pending: 0 };
 
-  const now = Date.now();
   const operations = (await allQueueItems())
-    .filter(item => (item.status === "pending" || item.status === "failed") && (!item.next_retry_at || item.next_retry_at <= now))
+    .filter(item => (item.status === "pending" || item.status === "failed") && (!item.next_retry_at || item.next_retry_at <= Date.now()))
     .sort((a, b) => a.created_at - b.created_at);
 
   let synced = 0;
@@ -166,7 +125,6 @@ export async function syncPendingOperations(
 
   for (const operation of operations) {
     if (typeof navigator !== "undefined" && navigator.onLine === false) break;
-
     operation.status = "syncing";
     operation.updated_at = Date.now();
     await updateQueue(operation);
@@ -196,9 +154,7 @@ export async function syncPendingOperations(
 }
 
 export function registerOfflineSync(sender: (operation: QueueOperation) => Promise<void>) {
-  const attempt = () => {
-    void syncPendingOperations(sender).catch(error => console.warn("[SYNC] queue processing failed", error));
-  };
+  const attempt = () => void syncPendingOperations(sender).catch(error => console.warn("[SYNC] queue processing failed", error));
   window.addEventListener("online", attempt);
   attempt();
   return () => window.removeEventListener("online", attempt);
