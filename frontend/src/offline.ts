@@ -213,5 +213,6 @@ export function registerOfflineSync(sender: (operation: QueueOperation) => Promi
     void syncPendingOperations(sender).catch(error => console.warn("[SYNC] queue processing failed", error));
   };
   window.addEventListener("online", attempt);
+  if (navigator.onLine !== false) attempt();
   return () => window.removeEventListener("online", attempt);
 }
