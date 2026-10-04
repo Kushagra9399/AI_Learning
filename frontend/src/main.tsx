@@ -575,10 +575,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
                 {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
                 {!selected.level_approved
                   ? <button onClick={approveLevel} disabled={selectedLevel === ""}>Approve & lock level</button>
-                  : <>
-                      <span className="badge approved">LEVEL LOCKED</span>
-                      <button className="secondary" onClick={unlockLevel}>Unlock level</button>
-                    </>}
+                  : <span className="badge approved">LEVEL LOCKED</span>}
               </div>
             </section>
           </section>}
@@ -1118,13 +1115,3 @@ function App() {
     if (user && (window.location.pathname === "/" || (window.location.pathname === "/login" || window.location.pathname === "/signup"))) {
       navigate(user.role === "admin" ? "/admin/dashboard" : "/worker/dashboard");
     }
-  }, [user]);
-
-  if (loading) return <main className="auth-page"><p>Loading...</p></main>;
-  if (!user) return <Login onLogin={(nextUser) => { setUser(nextUser); navigate(nextUser.role === "admin" ? "/admin/dashboard" : "/worker/dashboard"); }} />;
-
-  const logout = () => { localStorage.removeItem(TOKEN_KEY); setUser(null); navigate("/login"); };
-  return user.role === "admin" ? <AdminDashboard user={user} onLogout={logout} /> : <WorkerDashboard user={user} onLogout={logout} />;
-}
-
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
