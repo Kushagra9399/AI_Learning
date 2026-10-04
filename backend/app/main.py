@@ -270,7 +270,7 @@ def create_question_job(payload: dict, _: AdminUser):
             candidate["candidate"],
             payload.get("count", 10),
         )
-        store.save_question_draft(assessment_id, questions)
+        store.save_questions(assessment_id, questions)
         return {"assessment_id": assessment_id, "questions": questions, "nsqf_level": level}
 
     store.run_async(job, process_questions)
@@ -282,7 +282,7 @@ def save_question_draft(payload: dict, _: AdminUser):
     questions = payload.get("questions")
     if not isinstance(questions, list) or not questions:
         raise HTTPException(status_code=400, detail="Question draft is required")
-    result = store.save_question_draft_from_admin(payload["assessment_id"], questions)
+    result = store.save_questions(payload["assessment_id"], questions)
     if not result.get("saved"):
         raise HTTPException(status_code=409, detail=result.get("reason", "Unable to save question draft"))
     return result
