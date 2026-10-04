@@ -64,10 +64,19 @@ class Store:
                     level INTEGER,
                     level_suggestion TEXT,
                     level_approved INTEGER DEFAULT 0,
-                    questions_draft TEXT,
                     questions TEXT,
                     questions_approved INTEGER DEFAULT 0,
                     started INTEGER DEFAULT 0,
+                    grading TEXT,
+                    marks_locked INTEGER DEFAULT 0,
+                    marks_locked_at TEXT,
+                    job_type TEXT,
+                    job_status TEXT,
+                    job_progress INTEGER DEFAULT 0,
+                    job_result TEXT,
+                    job_error TEXT,
+                    job_acknowledged INTEGER DEFAULT 0,
+                    job_updated_at TEXT,
                     created_at TEXT
                 );
 
@@ -106,14 +115,37 @@ class Store:
             }
             migrations = {
                 "worker_user_id": "ALTER TABLE assessments ADD COLUMN worker_user_id INTEGER",
-                "questions_draft": "ALTER TABLE assessments ADD COLUMN questions_draft TEXT",
                 "grading": "ALTER TABLE assessments ADD COLUMN grading TEXT",
                 "marks_locked": "ALTER TABLE assessments ADD COLUMN marks_locked INTEGER DEFAULT 0",
                 "marks_locked_at": "ALTER TABLE assessments ADD COLUMN marks_locked_at TEXT",
+                "job_type": "ALTER TABLE assessments ADD COLUMN job_type TEXT",
+                "job_status": "ALTER TABLE assessments ADD COLUMN job_status TEXT",
+                "job_progress": "ALTER TABLE assessments ADD COLUMN job_progress INTEGER DEFAULT 0",
+                "job_result": "ALTER TABLE assessments ADD COLUMN job_result TEXT",
+                "job_error": "ALTER TABLE assessments ADD COLUMN job_error TEXT",
+                "job_acknowledged": "ALTER TABLE assessments ADD COLUMN job_acknowledged INTEGER DEFAULT 0",
+                "job_updated_at": "ALTER TABLE assessments ADD COLUMN job_updated_at TEXT",
             }
             for name, statement in migrations.items():
                 if name not in columns:
                     connection.execute(statement)
+
+            # One assessment row is the source of truth. Migrate any old
+            # question draft into the canonical questions column once.
+            if "questions_draft" in columns:
+                connection.execute("""
+                    UPDATE assessments
+                    SET questions=COALESCE(NULLIF(questions, ''), questions_draft)
+                    WHERE questions_draft IS NOT NULL
+                """)
+                try:
+                    connection.execute("ALTER TABLE assessments DROP COLUMN questions_draft")
+                except sqlite3.OperationalError:
+                    pass
+
+            # The old jobs table duplicated task identity/state. The
+            # assessment row now owns that state and uses assessment_id as job_id.
+            connection.execute("DROP TABLE IF EXISTS jobs")
 
     def create_user(self, username, name, phone, dob, password_hash, role):
         with self._connection() as connection:
@@ -233,38 +265,41 @@ class Store:
         }
 
     def job(self, kind, payload):
-        job_id = "job_" + uuid.uuid4().hex[:12]
+        assessment_id = payload.get("assessment_id")
+        if not assessment_id:
+            raise ValueError("assessment_id is required for every task")
+
         now = self._now()
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT INTO jobs
-                (id, type, status, progress, result, error, payload,
-                 acknowledged, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                UPDATE assessments
+                SET job_type=?, job_status='queued', job_progress=0,
+                    job_result=NULL, job_error=NULL, job_acknowledged=0,
+                    job_updated_at=?
+                WHERE assessment_id=?
                 """,
-                (
-                    job_id, kind, "queued", 0, None, None,
-                    json.dumps(payload), 0, now, now,
-                ),
+                (kind, now, assessment_id),
             )
-        return {"id": job_id, "status": "queued"}
+        # assessment_id is the single task/job identifier everywhere.
+        return {"id": assessment_id, "status": "queued"}
 
     def run_async(self, job, function):
         def runner():
             try:
                 with self._connection() as connection:
                     connection.execute(
-                        "UPDATE jobs SET status='running', progress=20, updated_at=? WHERE id=?",
+                        "UPDATE assessments SET job_status='running', job_progress=20, job_updated_at=? WHERE assessment_id=?",
                         (self._now(), job["id"]),
                     )
                 result = function()
                 with self._connection() as connection:
                     connection.execute(
                         """
-                        UPDATE jobs
-                        SET status='completed', progress=100, result=?, updated_at=?
-                        WHERE id=?
+                        UPDATE assessments
+                        SET job_status='completed', job_progress=100,
+                            job_result=?, job_updated_at=?
+                        WHERE assessment_id=?
                         """,
                         (json.dumps(result), self._now(), job["id"]),
                     )
@@ -272,9 +307,9 @@ class Store:
                 with self._connection() as connection:
                     connection.execute(
                         """
-                        UPDATE jobs
-                        SET status='failed', error=?, updated_at=?
-                        WHERE id=?
+                        UPDATE assessments
+                        SET job_status='failed', job_error=?, job_updated_at=?
+                        WHERE assessment_id=?
                         """,
                         (str(exc), self._now(), job["id"]),
                     )
@@ -374,33 +409,10 @@ class Store:
             )
         return {"assessment_id": assessment_id, "unlocked": True}
 
-    def save_question_draft(self, assessment_id, questions):
+    def save_questions(self, assessment_id, questions):
         with self._connection() as connection:
             row = connection.execute(
-                """
-                SELECT level_approved, questions_approved
-                FROM assessments WHERE assessment_id=?
-                """,
-                (assessment_id,),
-            ).fetchone()
-            if not row or not row["level_approved"] or row["questions_approved"]:
-                return False
-            connection.execute(
-                """
-                UPDATE assessments SET questions_draft=?
-                WHERE assessment_id=? AND questions_approved=0
-                """,
-                (json.dumps(questions), assessment_id),
-            )
-        return True
-
-    def save_question_draft_from_admin(self, assessment_id, questions):
-        with self._connection() as connection:
-            row = connection.execute(
-                """
-                SELECT level_approved, questions_approved
-                FROM assessments WHERE assessment_id=?
-                """,
+                "SELECT level_approved, questions_approved FROM assessments WHERE assessment_id=?",
                 (assessment_id,),
             ).fetchone()
             if not row:
@@ -412,13 +424,82 @@ class Store:
 
             connection.execute(
                 """
-                UPDATE assessments
-                SET questions_draft=?
+                UPDATE assessments SET questions=?
                 WHERE assessment_id=? AND questions_approved=0
                 """,
                 (json.dumps(questions), assessment_id),
             )
         return {"assessment_id": assessment_id, "saved": True}
+
+    def approve_questions(self, payload):
+        assessment_id = payload["assessment_id"]
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT level_approved, questions_approved, questions
+                FROM assessments WHERE assessment_id=?
+                """,
+                (assessment_id,),
+            ).fetchone()
+            if not row:
+                return {"assessment_id": assessment_id, "approved": False, "reason": "assessment_not_found"}
+            if not row["level_approved"]:
+                return {"assessment_id": assessment_id, "approved": False, "reason": "level_not_approved"}
+            if row["questions_approved"]:
+                return {"assessment_id": assessment_id, "approved": False, "reason": "questions_already_approved"}
+
+            questions = self._json_or_none(row["questions"]) or []
+            if not questions:
+                return {"assessment_id": assessment_id, "approved": False, "reason": "no_questions"}
+
+            connection.execute(
+                """
+                UPDATE assessments
+                SET questions_approved=1
+                WHERE assessment_id=? AND questions_approved=0
+                """,
+                (assessment_id,),
+            )
+            saved = connection.execute(
+                "SELECT questions, questions_approved FROM assessments WHERE assessment_id=?",
+                (assessment_id,),
+            ).fetchone()
+
+        return {
+            "assessment_id": assessment_id,
+            "approved": True,
+            "questions_approved": bool(saved["questions_approved"]),
+            "questions": self._worker_questions(self._json_or_none(saved["questions"])),
+        }
+
+    def get_job(self, job_id):
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT assessment_id, job_type, job_status, job_progress,
+                       job_result, job_error, job_acknowledged
+                FROM assessments WHERE assessment_id=?
+                """,
+                (job_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["assessment_id"],
+            "type": row["job_type"],
+            "status": row["job_status"],
+            "progress": row["job_progress"] or 0,
+            "result": self._json_or_none(row["job_result"]),
+            "error": row["job_error"],
+            "acknowledged": bool(row["job_acknowledged"]),
+        }
+
+    def acknowledge_job(self, job_id):
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE assessments SET job_acknowledged=1 WHERE assessment_id=?",
+                (job_id,),
+            )
 
     def approve_questions(self, payload):
         with self._connection() as connection:
