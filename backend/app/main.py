@@ -367,6 +367,7 @@ def create_assessor_evaluation(assessment_id: str, payload: dict, _: AdminUser):
 
     evaluation_payload = {
         **view["submission"],
+        "assessment_id": assessment_id,
         "practical_scores": payload.get("practical_scores", []),
     }
     job = store.job("assessor_evaluation", evaluation_payload)
