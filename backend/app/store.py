@@ -44,7 +44,7 @@ class Store:
                     assessment_id TEXT PRIMARY KEY,
                     worker_user_id INTEGER,
                     candidate TEXT,
-                    level INTEGER,
+                    level REAL,
                     level_suggestion TEXT,
                     level_approved INTEGER DEFAULT 0,
                     questions TEXT,
