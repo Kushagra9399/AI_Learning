@@ -110,8 +110,20 @@ function updateQueue(operation: QueueOperation) {
 export async function getQueueStatus(assessmentId: string): Promise<SyncStatus | null> {
   const items = (await allQueueItems()).filter(item => item.assessment_id === assessmentId && item.status !== "synced");
   if (!items.length) return null;
-  if (items.some(item => item.status === "syncing")) return "syncing";
-  if (items.some(item => item.status === "failed")) return "failed";
+
+  const now = Date.now();
+  for (const item of items) {
+    if (item.status === "syncing" && now - item.updated_at > 30000) {
+      item.status = "pending";
+      item.updated_at = now;
+      await updateQueue(item);
+    }
+  }
+
+  const current = (await allQueueItems()).filter(item => item.assessment_id === assessmentId && item.status !== "synced");
+  if (!current.length) return null;
+  if (current.some(item => item.status === "syncing")) return "syncing";
+  if (current.some(item => item.status === "failed")) return "failed";
   return "pending";
 }
 
