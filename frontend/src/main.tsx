@@ -464,11 +464,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load assessment"); }
   }
 
-  useEffect(() => {
-    loadList();
-    const timer = window.setInterval(loadList, 3000);
-    return () => window.clearInterval(timer);
-  }, []);
+  useEffect(() => { loadList(); }, []);
 
   useEffect(() => {
     if (!jobId) return;
