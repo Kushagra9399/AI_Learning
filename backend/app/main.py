@@ -151,7 +151,10 @@ def get_practical_tasks(_: CurrentUser):
 @app.post("/api/worker/assessment")
 def create_worker_assessment(payload: dict, worker: WorkerUser):
     assessment_id = payload.get("assessment_id")
-    assessment = store.create_worker_assessment(worker["id"], payload, assessment_id=assessment_id)
+    try:
+        assessment = store.create_worker_assessment(worker["id"], payload, assessment_id=assessment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     if assessment["existing"]:
         return assessment
 
