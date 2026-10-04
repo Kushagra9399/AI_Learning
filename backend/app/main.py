@@ -150,7 +150,8 @@ def get_practical_tasks(_: CurrentUser):
 
 @app.post("/api/worker/assessment")
 def create_worker_assessment(payload: dict, worker: WorkerUser):
-    assessment = store.create_worker_assessment(worker["id"], payload)
+    assessment_id = payload.get("assessment_id")
+    assessment = store.create_worker_assessment(worker["id"], payload, assessment_id=assessment_id)
     if assessment["existing"]:
         return assessment
 
@@ -332,8 +333,9 @@ async def upload_evidence(
     assessment_id: str = Form(...),
     task_id: str = Form(...),
     media: UploadFile = File(...),
+    evidence_id: str | None = Form(None),
 ):
-    evidence_id = "ev_" + __import__("uuid").uuid4().hex[:12]
+    evidence_id = evidence_id or ("ev_" + __import__("uuid").uuid4().hex[:12])
     filename = Path(media.filename or "evidence.bin").name
     target = EVIDENCE_DIR / f"{evidence_id}_{filename}"
     target.write_bytes(await media.read())
