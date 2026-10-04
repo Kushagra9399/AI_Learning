@@ -147,13 +147,13 @@ async function backendReachable(): Promise<boolean> {
 
 export async function syncPendingOperations(sender: (operation: QueueOperation) => Promise<void>) {
   if (syncInProgress) return { synced: 0, pending: 0 };
-  if (!(await backendReachable())) {
-    console.log("[SYNC] network/backend unavailable; queue remains pending");
-    return { synced: 0, pending: 0 };
-  }
-
   syncInProgress = true;
+
   try {
+    if (!(await backendReachable())) {
+      console.log("[SYNC] network/backend unavailable; queue remains pending");
+      return { synced: 0, pending: 0 };
+    }
     const now = Date.now();
     const existing = await allQueueItems();
 
