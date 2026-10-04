@@ -224,6 +224,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
       if (data.exists) {
         setAssessment(data);
         await cacheAssessment(user.id, data);
+        setAnswers(await getAnswers(user.id, data.assessment_id));
         if (data.candidate) setCandidate(data.candidate);
         if (data.assessment_id) {
           try { setWorkerResult(await api(`/worker/assessment/${data.assessment_id}/result`)); } catch { setWorkerResult(null); }
