@@ -271,14 +271,25 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
 
   async function createAssessment() {
     const payload = { ...candidate, assessment_id: assessment?.assessment_id || "assessment_" + crypto.randomUUID().replaceAll("-", "").slice(0, 12) };
+    await enqueueOperation({ assessment_id: payload.assessment_id, operation_type: "profile", payload });
+    setSyncStatus("pending");
+    setMessage("Saved locally. Synchronizing when connectivity is available...");
     try {
-      const data = await api("/worker/assessment", { method: "POST", body: JSON.stringify(payload) });
-      await load();
-      setMessage(data.existing ? "Your existing assessment was restored." : "Declaration submitted. Awaiting administrator review.");
-    } catch {
-      await enqueueOperation({ assessment_id: payload.assessment_id, operation_type: "profile", payload });
+      await syncPendingOperations(async operation => {
+        if (operation.operation_type !== "profile") return;
+        await api("/worker/assessment", { method: "POST", body: JSON.stringify(operation.payload) });
+      });
+      const status = await getQueueStatus(payload.assessment_id);
+      setSyncStatus(status || "synced");
+      if (!status) {
+        await load();
+        setMessage("Declaration submitted. Awaiting administrator review.");
+      } else {
+        setMessage("Saved locally. It will be submitted automatically when connectivity is available.");
+      }
+    } catch (error) {
       setSyncStatus("pending");
-      setMessage("Saved locally. It will be submitted automatically when connectivity is available.");
+      setMessage(error instanceof Error ? error.message : "Saved locally. Synchronization will retry.");
     }
   }
 
