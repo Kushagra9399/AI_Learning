@@ -509,11 +509,7 @@ class Store:
                 return {"assessment_id": assessment_id, "approved": False, "reason": "no_questions"}
 
             connection.execute(
-                """
-                UPDATE assessments
-                SET questions_approved=1
-                WHERE assessment_id=? AND questions_approved=0
-                """,
+                "UPDATE assessments SET questions_approved=1 WHERE assessment_id=? AND questions_approved=0",
                 (assessment_id,),
             )
             saved = connection.execute(
@@ -554,72 +550,6 @@ class Store:
         with self._connection() as connection:
             connection.execute(
                 "UPDATE assessments SET job_acknowledged=1 WHERE assessment_id=?",
-                (job_id,),
-            )
-
-    def approve_questions(self, payload):
-        with self._connection() as connection:
-            row = connection.execute(
-                """
-                SELECT level_approved, questions_approved, questions_draft
-                FROM assessments WHERE assessment_id=?
-                """,
-                (payload["assessment_id"],),
-            ).fetchone()
-            if not row:
-                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "assessment_not_found"}
-            if not row["level_approved"]:
-                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "level_not_approved"}
-            if row["questions_approved"]:
-                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "questions_already_approved"}
-
-            questions = self._json_or_none(row["questions_draft"]) or []
-            if not questions:
-                return {"assessment_id": payload["assessment_id"], "approved": False, "reason": "no_question_draft"}
-
-            connection.execute(
-                """
-                UPDATE assessments
-                SET questions=?, questions_draft=NULL, questions_approved=1
-                WHERE assessment_id=? AND questions_approved=0
-                """,
-                (json.dumps(questions), payload["assessment_id"]),
-            )
-
-            saved = connection.execute(
-                "SELECT questions, questions_approved FROM assessments WHERE assessment_id=?",
-                (payload["assessment_id"],),
-            ).fetchone()
-
-        return {
-            "assessment_id": payload["assessment_id"],
-            "approved": True,
-            "questions_approved": bool(saved["questions_approved"]),
-            "questions": self._worker_questions(self._json_or_none(saved["questions"])),
-        }
-
-    def get_job(self, job_id):
-        with self._connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM jobs WHERE id=?",
-                (job_id,),
-            ).fetchone()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "type": row["type"],
-            "status": row["status"],
-            "progress": row["progress"],
-            "result": json.loads(row["result"]) if row["result"] else None,
-            "error": row["error"],
-            "acknowledged": bool(row["acknowledged"]),
-        }
-
-    def acknowledge_job(self, job_id):
-        with self._connection() as connection:
-            connection.execute(
-                "UPDATE jobs SET acknowledged=1 WHERE id=?",
                 (job_id,),
             )
 
