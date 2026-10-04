@@ -799,14 +799,14 @@ class Store:
                 """,
                 (json.dumps(payload), submitted_at, assessment_id),
             )
-            if connection.total_changes == 0:
+            if connection.execute("SELECT changes()").fetchone()[0] == 0:
                 return {"accepted": False, "reason": "single_attempt_already_submitted"}
         return {"accepted": True, "assessment_id": assessment_id}
 
 
     def lock_grading(self, assessment_id, payload):
         with self._connection() as connection:
-            row = connection.execute("SELECT questions, questions_approved, marks_locked FROM assessments WHERE assessment_id=?", (assessment_id,)).fetchone()
+            row = connection.execute("SELECT questions, questions_approved, marks_locked, submission_payload FROM assessments WHERE assessment_id=?", (assessment_id,)).fetchone()
             if not row:
                 return {"accepted": False, "reason": "assessment_not_found"}
             if not row["questions_approved"]:
