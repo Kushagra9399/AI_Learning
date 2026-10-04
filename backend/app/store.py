@@ -179,9 +179,62 @@ class Store:
                 """)
                 connection.execute("DROP TABLE signoffs")
 
-            # The old jobs table duplicated task identity/state. The
-            # assessment row now owns that state and uses assessment_id as job_id.
-            connection.execute("DROP TABLE IF EXISTS jobs")
+            # Migrate the latest legacy job state into the matching assessment
+            # row before removing the redundant jobs table.
+            legacy_jobs = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"
+            ).fetchone()
+            if legacy_jobs:
+                connection.execute("""
+                    UPDATE assessments
+                    SET job_type = (
+                        SELECT j.type FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    ),
+                    job_status = (
+                        SELECT j.status FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    ),
+                    job_progress = COALESCE((
+                        SELECT j.progress FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    ), job_progress),
+                    job_result = (
+                        SELECT j.result FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    ),
+                    job_error = (
+                        SELECT j.error FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    ),
+                    job_acknowledged = COALESCE((
+                        SELECT j.acknowledged FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    ), job_acknowledged),
+                    job_updated_at = (
+                        SELECT j.updated_at FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                        ORDER BY j.updated_at DESC
+                        LIMIT 1
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM jobs j
+                        WHERE json_extract(j.payload, '$.assessment_id') = assessments.assessment_id
+                    )
+                """)
+                connection.execute("DROP TABLE jobs")
 
     def create_user(self, username, name, phone, dob, password_hash, role):
         with self._connection() as connection:
