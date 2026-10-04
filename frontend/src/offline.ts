@@ -19,6 +19,8 @@ const QUEUE = "sync_queue";
 const ASSESSMENTS = "assessments";
 const ANSWERS = "answers";
 const EVIDENCE = "evidence";
+const API_HEALTH_URL = "http://localhost:8000/api/health";
+let syncInProgress = false;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -113,19 +115,54 @@ export async function getQueueStatus(assessmentId: string): Promise<SyncStatus |
   return "pending";
 }
 
-export async function syncPendingOperations(sender: (operation: QueueOperation) => Promise<void>) {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) return { synced: 0, pending: 0 };
+async function backendReachable(): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await fetch(API_HEALTH_URL, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
-  const operations = (await allQueueItems())
+export async function syncPendingOperations(sender: (operation: QueueOperation) => Promise<void>) {
+  if (syncInProgress) return { synced: 0, pending: 0 };
+  if (!(await backendReachable())) {
+    console.log("[SYNC] network/backend unavailable; queue remains pending");
+    return { synced: 0, pending: 0 };
+  }
+
+  syncInProgress = true;
+  try {
+    const now = Date.now();
+    const existing = await allQueueItems();
+    // A tab/browser crash can leave an operation in "syncing" forever.
+    for (const stale of existing) {
+      if (stale.status === "syncing" && now - stale.updated_at > 30000) {
+        stale.status = "pending";
+        stale.updated_at = now;
+        await updateQueue(stale);
+      }
+    }
+
+    const operations = (await allQueueItems())
     .filter(item => (item.status === "pending" || item.status === "failed") && (!item.next_retry_at || item.next_retry_at <= Date.now()))
     .sort((a, b) => a.created_at - b.created_at);
 
-  let synced = 0;
-  let pending = 0;
+    let synced = 0;
+    let pending = 0;
 
-  for (const operation of operations) {
-    if (typeof navigator !== "undefined" && navigator.onLine === false) break;
-    operation.status = "syncing";
+    for (const operation of operations) {
+      if (!(await backendReachable())) break;
+      operation.status = "syncing";
     operation.updated_at = Date.now();
     await updateQueue(operation);
 
@@ -146,16 +183,23 @@ export async function syncPendingOperations(sender: (operation: QueueOperation) 
       await updateQueue(operation);
       pending += 1;
       console.warn("[SYNC] retry scheduled", operation.assessment_id, operation.operation_type, operation.last_error);
-      if (typeof navigator !== "undefined" && navigator.onLine === false) break;
+      if (!(await backendReachable())) break;
     }
-  }
 
-  return { synced, pending };
+    return { synced, pending };
+  } finally {
+    syncInProgress = false;
+  }
 }
 
 export function registerOfflineSync(sender: (operation: QueueOperation) => Promise<void>) {
-  const attempt = () => void syncPendingOperations(sender).catch(error => console.warn("[SYNC] queue processing failed", error));
+  const attempt = () => {
+    if (navigator.onLine === false) {
+      console.log("[SYNC] browser offline; not attempting synchronization");
+      return;
+    }
+    void syncPendingOperations(sender).catch(error => console.warn("[SYNC] queue processing failed", error));
+  };
   window.addEventListener("online", attempt);
-  attempt();
   return () => window.removeEventListener("online", attempt);
 }
