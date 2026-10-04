@@ -296,7 +296,7 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def create_worker_assessment(self, worker_user_id, candidate):
+    def create_worker_assessment(self, worker_user_id, candidate, assessment_id=None):
         with self._connection() as connection:
             existing = connection.execute(
                 """
@@ -326,7 +326,7 @@ class Store:
                     "started": bool(existing["started"]),
                 }
 
-            assessment_id = "assessment_" + uuid.uuid4().hex[:12]
+            assessment_id = assessment_id or ("assessment_" + uuid.uuid4().hex[:12])
             connection.execute(
                 """
                 INSERT INTO assessments
@@ -749,7 +749,7 @@ class Store:
             if not row["started"]:
                 return {"accepted": False, "reason": "assessment_not_started"}
             if row["submitted_at"]:
-                return {"accepted": False, "reason": "single_attempt_already_submitted"}
+                return {"accepted": True, "already_processed": True, "assessment_id": assessment_id, "submitted_at": row["submitted_at"]}
             submitted_at = self._now()
             connection.execute(
                 """
@@ -759,9 +759,7 @@ class Store:
                 """,
                 (json.dumps(payload), submitted_at, assessment_id),
             )
-            if connection.execute("SELECT changes()").fetchone()[0] == 0:
-                return {"accepted": False, "reason": "single_attempt_already_submitted"}
-        return {"accepted": True, "assessment_id": assessment_id}
+        return {"accepted": True, "assessment_id": assessment_id, "submitted_at": submitted_at}
 
 
     def lock_grading(self, assessment_id, payload):
@@ -836,6 +834,9 @@ class Store:
             ).fetchone()
             if not row or row["worker_user_id"] != worker_user_id:
                 return False
+            existing = connection.execute("SELECT evidence_id FROM evidence WHERE evidence_id=?", (evidence_id,)).fetchone()
+            if existing:
+                return True
             connection.execute(
                 """
                 INSERT INTO evidence
