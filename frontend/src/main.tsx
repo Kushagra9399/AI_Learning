@@ -261,16 +261,18 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
     }
   }
 
+  async function persistEvidence(questionId: string, file: File) {
+    if (!assessment) return;
+    const evidence_id = "ev_" + crypto.randomUUID();
+    await saveEvidence({ evidence_id, assessment_id: assessment.assessment_id, task_id: questionId, file, filename: file.name, media_type: file.type || "application/octet-stream" });
+    await enqueueOperation({ assessment_id: assessment.assessment_id, operation_type: "evidence", payload: { evidence_id } });
+    setSyncStatus("pending");
+  }
+
   async function submit() {
     if (!assessment) return;
     const payload = { assessment_id: assessment.assessment_id, qp_code: "CON/Q0603", nsqf_level: assessment.level, candidate, answers: (assessment.questions || []).map(question => ({ ...question, response: answers[question.id] || "", selected_option: question.type === "mcq" ? Number(answers[question.id]) : -1 })), practical_scores: [] };
     try {
-      for (const question of assessment.questions || []) {
-        const file = files[question.id]; if (!file) continue;
-        const evidence_id = "ev_" + crypto.randomUUID();
-        await saveEvidence({ evidence_id, assessment_id: assessment.assessment_id, task_id: question.id, file, filename: file.name, media_type: file.type || "application/octet-stream" });
-        await enqueueOperation({ assessment_id: assessment.assessment_id, operation_type: "evidence", payload: { evidence_id } });
-      }
       await enqueueOperation({ assessment_id: assessment.assessment_id, operation_type: "submission", payload });
       setSyncStatus("pending");
       setMessage("Assessment saved on this device. It will be submitted automatically when connectivity is available.");
@@ -314,7 +316,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
       {!assessment.level_approved && <section className="panel"><h2>Awaiting approval</h2><p>The administrator has not approved your level yet.</p></section>}
       {assessment.level_approved && !assessment.questions_approved && <section className="panel"><h2>Questions being prepared</h2><p>Your level is locked. The administrator is reviewing your question package.</p></section>}
       {assessment.questions_approved && !assessment.started && !assessment.submitted && <section className="panel"><h2>Assessment ready</h2><p>Your approved assessment is ready.</p><button onClick={start}>Start assessment</button></section>}
-      {assessment.started && !assessment.submitted && <section className="panel">{questions.map(question => <article className="question-card" key={question.id}><div className="question-meta">{question.type.toUpperCase()} · {question.marks} marks</div><h3>{question.question}</h3>{question.type === "mcq" ? (question.options || []).map((option,i)=><label className="option" key={i}><input type="radio" name={question.id} checked={answers[question.id]===String(i)} onChange={()=>setAnswers({...answers,[question.id]:String(i)}); saveAnswers(user.id, assessment.assessment_id, {...answers,[question.id]:String(i)});}/>{option}</label>) : question.type === "text" ? <textarea value={answers[question.id] || ""} onChange={e=>setAnswers({...answers,[question.id]:e.target.value}); saveAnswers(user.id, assessment.assessment_id, {...answers,[question.id]:e.target.value});}/> : <input type="file" accept={question.type === "image" ? "image/*" : "video/*"} onChange={e=>{const f=e.target.files?.[0];if(f)setFiles({...files,[question.id]:f})}}/>}</article>)}<button onClick={submit}>Submit assessment</button></section>}
+      {assessment.started && !assessment.submitted && <section className="panel">{questions.map(question => <article className="question-card" key={question.id}><div className="question-meta">{question.type.toUpperCase()} · {question.marks} marks</div><h3>{question.question}</h3>{question.type === "mcq" ? (question.options || []).map((option,i)=><label className="option" key={i}><input type="radio" name={question.id} checked={answers[question.id]===String(i)} onChange={()=>setAnswers({...answers,[question.id]:String(i)}); saveAnswers(user.id, assessment.assessment_id, {...answers,[question.id]:String(i)});}/>{option}</label>) : question.type === "text" ? <textarea value={answers[question.id] || ""} onChange={e=>setAnswers({...answers,[question.id]:e.target.value}); saveAnswers(user.id, assessment.assessment_id, {...answers,[question.id]:e.target.value});}/> : <input type="file" accept={question.type === "image" ? "image/*" : "video/*"} onChange={async e=>{const f=e.target.files?.[0];if(f){setFiles({...files,[question.id]:f});try{await persistEvidence(question.id,f)}catch(error){setMessage(error instanceof Error?error.message:"Evidence saved locally but could not be queued")}}}}/>}</article>)}<button onClick={submit}>Submit assessment</button></section>}
       {assessment.submitted && workerResult?.locked && <section className="panel"><div className="score-card"><span>Final assessment score</span><strong>{workerResult.total_marks} / {workerResult.max_marks}</strong><small>Finalized and locked by the administrator</small></div></section>}
     </Shell>;
   }
@@ -359,7 +361,7 @@ function WorkerDashboard({ user, onLogout }: { user: User; onLogout: () => void 
             <article className="question-card" key={question.id}>
               <div className="question-meta">{question.type.toUpperCase()} · {question.marks} marks</div>
               <h3>{question.question}</h3>
-              {question.type === "mcq" ? (question.options || []).map((option, i) => <label className="option" key={i}><input type="radio" name={question.id} checked={answers[question.id] === String(i)} onChange={() => setAnswers({...answers,[question.id]:String(i)})} />{option}</label>) : question.type === "text" ? <textarea value={answers[question.id] || ""} onChange={e => setAnswers({...answers,[question.id]:e.target.value})} placeholder="Write your answer" /> : <input type="file" accept={question.type === "image" ? "image/*" : "video/*"} onChange={e => { const file=e.target.files?.[0]; if(file) setFiles({...files,[question.id]:file}); }} />}
+              {question.type === "mcq" ? (question.options || []).map((option, i) => <label className="option" key={i}><input type="radio" name={question.id} checked={answers[question.id] === String(i)} onChange={() => setAnswers({...answers,[question.id]:String(i)})} />{option}</label>) : question.type === "text" ? <textarea value={answers[question.id] || ""} onChange={e => setAnswers({...answers,[question.id]:e.target.value})} placeholder="Write your answer" /> : <input type="file" accept={question.type === "image" ? "image/*" : "video/*"} onChange={async e => { const file=e.target.files?.[0]; if(file) { setFiles({...files,[question.id]:file}); try { await persistEvidence(question.id, file); } catch (error) { setMessage(error instanceof Error ? error.message : "Evidence saved locally but could not be queued"); } } }} />}
             </article>
           ))}<button onClick={submit}>Submit assessment</button></section>}
 
@@ -978,140 +980,3 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   return (
     <Shell user={user} onLogout={onLogout}>
       <section className="page-heading"><div><p className="eyebrow">ASSESSMENT REVIEW</p><h1>{selected?.candidate?.name || "Assessment"}</h1><p className="muted">{selected?.assessment_id || "Select an assessment from the Assessments page."}</p></div><p className="muted">Every state transition is persisted and authorization is enforced by the API.</p></section>
-      <div className="admin-layout">
-        <section className="panel">
-          <div className="panel-header"><h2>Worker assessments</h2><button className="secondary" onClick={loadList}>Refresh</button></div>
-          {assessments.map(item => <button className={`assessment-row ${selected?.assessment_id===item.assessment_id?"selected":""}`} key={item.assessment_id} onClick={() => loadAssessment(item.assessment_id)}><span><strong>{item.candidate?.name || "Unnamed worker"}</strong><small>{item.assessment_id}</small></span><span>{item.level ? `Level ${item.level}` : "Level pending"}</span></button>)}
-          {!assessments.length && <p className="muted">No worker assessments yet.</p>}
-        </section>
-
-        {selected ? <section className="panel">
-          <div className="panel-header"><div><h2>{selected.candidate.name || "Worker assessment"}</h2><p className="muted">{selected.assessment_id}</p></div><span className={`badge ${selected.level_approved?"approved":"pending"}`}>{selected.level_approved?"LEVEL LOCKED":"REVIEW REQUIRED"}</span></div>
-
-          <div className="detail-tabs" role="tablist" aria-label="Assessment details">
-            <button className={detailTab==="worker" ? "detail-tab active" : "detail-tab"} onClick={()=>setDetailTab("worker")}>Worker inputs</button>
-            <button className={detailTab==="questions" ? "detail-tab active" : "detail-tab"} onClick={()=>setDetailTab("questions")}>Question paper</button>
-            <button className={detailTab==="answers" ? "detail-tab active" : "detail-tab"} onClick={()=>setDetailTab("answers")}>Worker answers</button>
-          </div>
-
-          {detailTab==="worker" && <section className="detail-pane">
-            <div className="candidate-box">
-              <h3>Worker information</h3>
-              <div className="form-grid readonly-grid">
-                <label>Name<input value={selected.candidate.name} readOnly /></label>
-                <label>Age<input value={selected.candidate.age} readOnly /></label>
-                <label>Years of experience<input value={selected.candidate.years_experience} readOnly /></label>
-                <label>Occupation<input value={selected.candidate.occupation} readOnly /></label>
-              </div>
-              <label>Work performed / skills<textarea value={selected.candidate.work_context} readOnly /></label>
-              <label>Prior training / certificates<textarea value={selected.candidate.prior_training || "No prior training listed"} readOnly /></label>
-            </div>
-            <section className="result">
-              <h3>NSQF level</h3>
-              <label>NSQF level
-                <select value={selectedLevel} onChange={e=>setSelectedLevel(Number(e.target.value) as NsqfLevel)} disabled={selected.level_approved}>
-                  <option value="">Select NSQF level</option>
-                  {NSQF_LEVELS.map(level=><option key={level} value={level}>Level {level}</option>)}
-                </select>
-              </label>
-              {selected.level_suggestion ? <>
-                <p>{selected.level_suggestion.reason}</p>
-                <small>AI recommendation: Level {selected.level_suggestion.suggested_level} · Confidence: {selected.level_suggestion.confidence}</small>
-              </> : <p className="muted">No AI recommendation yet. Run the recommendation to preselect a level.</p>}
-              <div className="actions">
-                {!selected.level_approved && <button onClick={regenerateLevel}>{selected.level_suggestion ? "Regenerate recommendation" : "Run AI recommendation"}</button>}
-                {!selected.level_approved
-                  ? <button onClick={approveLevel} disabled={selectedLevel === ""}>Approve & lock level</button>
-                  : <>
-                      <span className="badge approved">LEVEL LOCKED</span>
-                      <button className="secondary" onClick={unlockLevel}>Unlock level</button>
-                    </>}
-              </div>
-            </section>
-          </section>}
-
-          {detailTab==="questions" && <section className="detail-pane">
-            <div className="panel-header">
-              <div><h3>Question paper</h3><p className="muted">{selected.questions_approved ? "Approved and locked" : "Draft — editable until approval"}</p></div>
-              <span className={`badge ${selected.questions_approved ? "approved" : "pending"}`}>{selected.questions_approved ? "LOCKED" : "DRAFT"}</span>
-            </div>
-            <p className="muted">{selected.level_approved ? `NSQF Level ${selected.level} · ${questions.length} questions` : "Approve the level before generating questions."}</p>
-            {!selected.questions_approved && <button onClick={generateQuestions} disabled={!selected.level_approved}>Generate questions</button>}
-            {questions.length > 0 && <div className="question-editor">
-              {questions.map((q,i) => selected.questions_approved ? (
-                <article className="question-card locked-question" key={q.id}>
-                  <div className="question-meta">QUESTION {i+1} · {q.type.toUpperCase()} · {q.marks} MARKS</div>
-                  <h3>{q.question}</h3>
-                  {q.options?.length ? <ol className="question-options">{q.options.map((option,j)=><li key={j}>{option}</li>)}</ol> : null}
-                  <span className="lock-note">Approved question · read only</span>
-                </article>
-              ) : (
-                <article className="question-card" key={q.id}>
-                  <input value={q.question} onChange={e=>updateQuestion(i,{question:e.target.value})}/>
-                  {q.options?.length ? <div className="question-options-editor">{q.options.map((option,j)=><input key={j} value={option} onChange={e=>updateQuestion(i,{options:q.options?.map((x,k)=>k===j?e.target.value:x)})}/>)}</div> : null}
-                  <div className="inline-fields"><select value={q.type} onChange={e=>updateQuestion(i,{type:e.target.value as Question["type"]})}><option value="mcq">MCQ</option><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option></select><input type="number" min="1" max="10" value={q.marks} onChange={e=>updateQuestion(i,{marks:Number(e.target.value)})}/></div>
-                  <button className="danger" onClick={()=>setQuestions(current=>current.filter((_,x)=>x!==i))}>Delete</button>
-                </article>
-              ))}
-            </div>}
-            {!selected.questions_approved && <button onClick={approveQuestions} disabled={!questions.length}>Approve & activate assessment</button>}
-          </section>}
-
-          {detailTab==="answers" && <section className="detail-pane">
-            <div className="panel-header">
-              <div><h3>Worker answers</h3><p className="muted">{selected.submitted ? `Submitted ${selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ""}` : "Not submitted yet"}</p></div>
-              <div className="grading-header-actions">
-                {selected.marks_locked ? <span className="badge approved">MARKS LOCKED</span> : selected.submitted ? <button onClick={lockGrading}>Lock & submit marks</button> : null}
-                {selected.grading?.total_marks !== undefined && <strong className="total-score">{selected.grading.total_marks} / {selected.grading.max_marks}</strong>}
-              </div>
-            </div>
-            {selected.submitted && selected.submission ? <div className="submission-summary">
-              {(selected.submission.answers || []).map((answer:any,index:number)=>{
-                const q = questions.find(item => String(item.id) === String(answer.id)) || answer;
-                const status = objectiveStatus(q);
-                const lockedItem = selected.grading?.items?.find((item:any)=>String(item.question_id)===String(q.id));
-                const subjective = ["text","image","video"].includes(q.type);
-                const awarded = lockedItem?.marks_awarded ?? gradingMarks[q.id] ?? 0;
-                return <article className={`question-card answer-card ${status==="correct"?"answer-correct":status==="incorrect"?"answer-incorrect":""}`} key={answer.id || index}>
-                  <div className="question-meta">QUESTION {index+1} · {q.type?.toUpperCase() || "TEXT"} · {q.marks || 0} MARKS
-                    {status==="correct" && <span className="answer-badge correct">✓ Correct</span>}
-                    {status==="incorrect" && <span className="answer-badge incorrect">✕ Incorrect</span>}
-                    {status==="unanswered" && <span className="answer-badge unanswered">— Unanswered</span>}
-                  </div>
-                  <h3>{q.question}</h3>
-                  {q.options?.length ? <p><strong>Selected:</strong> {answer.selected_option >= 0 ? q.options[answer.selected_option] : "Not answered"}</p> : <p><strong>Response:</strong> {answer.response || "Not answered"}</p>}
-                  {subjective && <div className="manual-marking">
-                    <label>Admin marks
-                      <input type="number" min="0" max={q.marks || 0} step="1" value={awarded} disabled={selected.marks_locked} onChange={e=>setGradingMarks({...gradingMarks,[q.id]:Number(e.target.value)})}/>
-                      <small>Maximum: {q.marks || 0} marks</small>
-                    </label>
-                    <span className="marking-note">{selected.marks_locked ? "Final mark locked" : "Enter the mark before locking"}</span>
-                  </div>}
-                </article>;
-              })}
-              <div className="grading-footer">
-                <div><span>Final total</span><strong>{selected.marks_locked ? `${selected.grading?.total_marks || 0} / ${selected.grading?.max_marks || 0}` : `${questions.reduce((sum,q)=>sum+(q.type==="mcq" && objectiveStatus(q)==="correct" ? q.marks : q.type!=="mcq" ? Number(gradingMarks[q.id]||0) : 0),0)} / ${questions.reduce((sum,q)=>sum+(q.marks||0),0)}`}</strong></div>
-                {!selected.marks_locked && selected.submitted && <button onClick={lockGrading}>Lock & submit marks</button>}
-              </div>
-            </div> : <div className="empty"><p className="muted">The worker has not submitted the assessment yet.</p></div>}
-          </section>}
-        </section> : <section className="panel empty"><h2>Select an assessment</h2><p className="muted">Choose a worker from the list to review their declaration and assessment state.</p></section>}
-      </div>
-      {message && <p className="notice">{message}</p>}
-    </Shell>
-  );
-}
-
-function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!token()) { setLoading(false); return; }
-    api("/auth/me").then(setUser).catch(() => {}).finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (user && (window.location.pathname === "/" || (window.location.pathname === "/login" || window.location.pathname === "/signup"))) {
-      navigate(user.role === "admin" ? "/admin/dashboard" : "/worker/dashboard");
-    }
